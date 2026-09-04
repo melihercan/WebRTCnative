@@ -9,11 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       webrtc_branch:
-        description: 'WebRTC branch-head, e.g. 7977. Leave empty to build the latest stable Chromium milestone.'
-        required: false
-        default: ''
-      chromium_milestone:
-        description: 'Chromium milestone, e.g. 152. Ignored when a branch is given above.'
+        description: 'WebRTC branch-head to build, e.g. 7977. Leave empty for the latest stable Chromium milestone.'
         required: false
         default: ''
       arch:
@@ -34,7 +30,6 @@ jobs:
         uses: ./.github/actions/resolve-webrtc-branch
         with:
           webrtc_branch: ${{ inputs.webrtc_branch }}
-          chromium_milestone: ${{ inputs.chromium_milestone }}
 
       - name: Free disk space
         run: |

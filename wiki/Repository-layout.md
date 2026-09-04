@@ -24,7 +24,7 @@ The resolver is a real Python script rather than inline shell so that it can be 
 outside CI:
 
 ```bash
-python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --milestone 152
+python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --branch 7977
 ```
 
 ## `wiki/`

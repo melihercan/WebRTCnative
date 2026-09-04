@@ -22,7 +22,6 @@ When it finishes, the artifact is at the bottom of the run page.
 
 ```bash
 gh workflow run WebRtcNativeWindowsDynamicLib.yml
-gh workflow run WebRtcNativeIosLib.yml -f chromium_milestone=152
 gh workflow run WebRtcNativeAndroidLib.yml -f webrtc_branch=7977
 gh run watch
 gh run download <run-id>
@@ -34,10 +33,11 @@ Present on every workflow:
 
 | Input | Default | Notes |
 |---|---|---|
-| `webrtc_branch` | *(empty)* | WebRTC branch-head, e.g. `7977`. Highest priority. |
-| `chromium_milestone` | *(empty)* | Chromium milestone, e.g. `152`. Ignored if a branch is given. |
+| `webrtc_branch` | *(empty)* | WebRTC branch-head, e.g. `7977`. Empty means latest stable. |
 
-See [Branch selection](Branch-selection) for how these interact.
+Note this is the **branch** number (`7977`), not the Chromium milestone (`152`);
+<https://chromiumdash.appspot.com/branches> maps one to the other. See
+[Branch selection](Branch-selection) for why there is only one input.
 
 Platform-specific:
 

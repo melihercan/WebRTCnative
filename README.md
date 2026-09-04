@@ -14,12 +14,9 @@ Blank means *build the latest stable Chromium milestone*: the workflow asks
 [chromiumdash](https://chromiumdash.appspot.com/branches) which milestone is currently stable and
 builds that milestone's WebRTC branch. No version is hard-coded anywhere, so nothing goes stale.
 
-To pin a version, set **one** of:
-
-| Input | Example |
-|---|---|
-| `webrtc_branch` | `7977` |
-| `chromium_milestone` | `152` |
+To pin a version, set `webrtc_branch` to a WebRTC branch-head number, e.g. `7977`. That is the
+branch number, not the Chromium milestone (`152`) —
+[chromiumdash](https://chromiumdash.appspot.com/branches) lists the two side by side.
 
 Every run prints the branch it resolved and records it in the job summary. Expect about an hour.
 

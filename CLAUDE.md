@@ -47,20 +47,22 @@ Two plausible alternatives are wrong, and were rejected deliberately — do not 
 - The largest `refs/branch-heads/*` in the WebRTC repo returns branches nobody ships (8043 while
   the stable branch was 7977).
 
-Overrides, on every workflow: `webrtc_branch` (e.g. `7977`) wins over `chromium_milestone`
-(e.g. `152`); both empty means auto-detect. Defaults are **empty on purpose** — a
-`workflow_dispatch` default is a static string, so prefilling a number would just relocate the
-hard-coded version into the input box.
+Override, on every workflow: a single `webrtc_branch` input (e.g. `7977`); empty means
+auto-detect. **One input on purpose** — milestone and branch are one to one, so a second box would
+just be another way of naming the same thing, and it could not express a branch the dashboard no
+longer lists. The branch is what the checkout uses, so nothing is translated between what is typed
+and what is built; the milestone is still reported, via reverse lookup, as a label. The default is
+**empty on purpose** — a `workflow_dispatch` default is a static string, so prefilling a number
+would just relocate the hard-coded version into the input box.
 
 The resolver validates the branch with `git ls-remote` before any build starts, and writes
-`branch` / `milestone` / `source` outputs plus a job summary. An unknown milestone comes back from
-the dashboard as `[null]`, not `[]` — that case is handled explicitly.
+`branch` / `milestone` / `source` outputs plus a job summary. Dashboard responses are guarded for
+non-dict entries: an unknown milestone comes back as `[null]`, not `[]`.
 
 It is a standalone script so it can be tested off CI:
 
 ```powershell
 python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py
-python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --milestone 152
 python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --branch 7977
 ```
 

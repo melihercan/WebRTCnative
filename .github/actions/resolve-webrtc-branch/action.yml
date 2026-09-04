@@ -1,19 +1,15 @@
 name: Resolve WebRTC branch
 description: >-
-  Decide which WebRTC branch-head to build. With no inputs it asks the Chromium
+  Decide which WebRTC branch-head to build. With no input it asks the Chromium
   dashboard for the newest milestone that has actually reached stable and returns
-  that milestone's WebRTC branch. A branch number or a milestone may be given to
-  override the lookup. The result is checked against the real WebRTC repository
-  before it is returned, so a bad value fails in seconds rather than an hour into
-  a checkout that was never going to work.
+  that milestone's WebRTC branch. A branch number may be given to override the
+  lookup. The result is checked against the real WebRTC repository before it is
+  returned, so a bad value fails in seconds rather than an hour into a checkout
+  that was never going to work.
 
 inputs:
   webrtc_branch:
-    description: 'WebRTC branch-head number, e.g. 7977. Takes priority over chromium_milestone.'
-    required: false
-    default: ''
-  chromium_milestone:
-    description: 'Chromium milestone, e.g. 152. Used only when webrtc_branch is empty.'
+    description: 'WebRTC branch-head number, e.g. 7977. Empty means auto-detect.'
     required: false
     default: ''
 
@@ -35,11 +31,10 @@ runs:
     # ships Python, so one step covers ubuntu / macos / windows.
     - id: resolve
       shell: bash
-      # The inputs go through the environment rather than being interpolated
-      # into the script text, so nothing in them can be read as shell syntax.
+      # The input goes through the environment rather than being interpolated
+      # into the script text, so nothing in it can be read as shell syntax.
       env:
         IN_BRANCH: ${{ inputs.webrtc_branch }}
-        IN_MILESTONE: ${{ inputs.chromium_milestone }}
         SCRIPT_DIR: ${{ github.action_path }}
       run: |
         set -euo pipefail
@@ -51,6 +46,4 @@ runs:
           echo "::error::No Python interpreter on PATH; cannot resolve the WebRTC branch."
           exit 1
         fi
-        "$python_bin" "${SCRIPT_DIR}/resolve_webrtc_branch.py" \
-          --branch    "${IN_BRANCH:-}" \
-          --milestone "${IN_MILESTONE:-}"
+        "$python_bin" "${SCRIPT_DIR}/resolve_webrtc_branch.py" --branch "${IN_BRANCH:-}"

@@ -6,14 +6,19 @@ matching WebRTC branch (M152 -> branch-heads/7977).  The Chromium dashboard
 publishes that mapping, so the workflows ask it at run time instead of carrying
 a hard-coded branch number that silently rots.
 
-Resolution order:
+Resolution:
 
-  1. ``--branch N``      use branch-head N as given.
-  2. ``--milestone N``   ask the dashboard for milestone N's ``webrtc_branch``.
-  3. otherwise           auto-detect: the highest milestone whose
-                         ``schedule_phase`` is exactly ``"stable"``.
+  * ``--branch N``   build branch-head N as given.
+  * otherwise        auto-detect: the branch of the highest milestone whose
+                     ``schedule_phase`` is exactly ``"stable"``.
 
-On why (3) is written the way it is -- two more obvious approaches are wrong:
+The branch is the only knob.  A milestone would be a second way of naming the
+same thing, since the mapping is one to one, and it could not express a branch
+the dashboard no longer lists.  The milestone is still reported, resolved by
+reverse lookup, purely as a label.
+
+On why auto-detection is written the way it is -- two more obvious approaches
+are wrong:
 
   * ``fetch_releases?channel=Stable`` names the milestone that is *rolling out*,
     which runs one ahead of the milestone most users are on.  While M152 was
@@ -81,26 +86,28 @@ def milestone_for_branch(branch: str) -> str:
     return "unknown"
 
 
-def resolve(branch: str, milestone: str) -> tuple[str, str, str]:
+def milestone_for_milestone_number(milestone: str) -> str:
+    """Best-effort branch lookup, used only to improve an error message."""
+    try:
+        entries = get_json(f"{DASHBOARD}/fetch_milestones?mstone={milestone}")
+        entry = entries[0] if isinstance(entries, list) and entries else None
+        if isinstance(entry, dict) and entry.get("webrtc_branch"):
+            return str(entry["webrtc_branch"])
+    except SystemExit:
+        pass
+    return ""
+
+
+def resolve(branch: str) -> tuple[str, str, str]:
     """Return (branch, milestone, human-readable explanation of the choice)."""
     if branch:
         if not branch.isdigit():
-            fail(f"--branch must be a number such as 7977, got {branch!r}.")
-        return branch, milestone_for_branch(branch), f"manual override (branch {branch})"
-
-    if milestone:
-        if not milestone.isdigit():
-            fail(f"--milestone must be a number such as 152, got {milestone!r}.")
-        entries = get_json(f"{DASHBOARD}/fetch_milestones?mstone={milestone}")
-        # An unknown milestone comes back as [null], not as an empty list.
-        entry = entries[0] if isinstance(entries, list) and entries else None
-        if not isinstance(entry, dict) or not entry.get("webrtc_branch"):
             fail(
-                f"The Chromium dashboard has no WebRTC branch for milestone {milestone}. "
-                "Check https://chromiumdash.appspot.com/branches for valid milestones."
+                f"--branch must be a WebRTC branch-head number such as 7977, got {branch!r}. "
+                "Note that 152 is a Chromium milestone, not a branch; "
+                "https://chromiumdash.appspot.com/branches maps one to the other."
             )
-        resolved = str(entry["webrtc_branch"])
-        return resolved, milestone, f"manual override (Chromium M{milestone})"
+        return branch, milestone_for_branch(branch), f"manual override (branch {branch})"
 
     entries = get_json(f"{DASHBOARD}/fetch_milestones") or []
     stable = [
@@ -110,7 +117,7 @@ def resolve(branch: str, milestone: str) -> tuple[str, str, str]:
     if not stable:
         fail(
             "No milestone is in the 'stable' phase on the Chromium dashboard right now. "
-            "Re-run this workflow with an explicit webrtc_branch or chromium_milestone."
+            "Re-run this workflow with an explicit webrtc_branch."
         )
     newest = max(stable, key=lambda e: e["milestone"])
     if not newest.get("webrtc_branch"):
@@ -147,18 +154,23 @@ def emit(name: str, value: str, path_variable: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--branch", default="", help="WebRTC branch-head number, e.g. 7977")
-    parser.add_argument("--milestone", default="", help="Chromium milestone, e.g. 152")
     arguments = parser.parse_args()
 
-    branch = arguments.branch.strip()
-    milestone = arguments.milestone.strip()
-
-    branch, milestone, source = resolve(branch, milestone)
+    branch, milestone, source = resolve(arguments.branch.strip())
 
     print(f"Verifying refs/branch-heads/{branch} exists in {WEBRTC_REPO} ...")
     if not branch_exists(branch):
+        # Branch numbers are four digits; a three-digit value is almost always a
+        # Chromium milestone typed into the branch box.
+        hint = ""
+        if len(branch) <= 3:
+            resolved = milestone_for_milestone_number(branch)
+            hint = (
+                f" {branch} looks like a Chromium milestone rather than a branch"
+                + (f"; M{branch} is branch-heads/{resolved}." if resolved else ".")
+            )
         fail(
-            f"refs/branch-heads/{branch} does not exist in the WebRTC repository. "
+            f"refs/branch-heads/{branch} does not exist in the WebRTC repository.{hint} "
             "See https://chromiumdash.appspot.com/branches for the branch of each milestone."
         )
 

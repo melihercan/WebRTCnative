@@ -5,18 +5,13 @@
 **`No milestone is in the 'stable' phase on the Chromium dashboard right now.`**
 
 The dashboard is briefly inconsistent, usually during a milestone rollover. Pass an explicit
-`chromium_milestone` or `webrtc_branch` and carry on; check
-<https://chromiumdash.appspot.com/branches> to pick one.
+`webrtc_branch` and carry on; check <https://chromiumdash.appspot.com/branches> to pick one.
 
 **`refs/branch-heads/NNNN does not exist in the WebRTC repository.`**
 
-The branch number is wrong. Milestone numbers (152) and branch numbers (7977) are easy to
-transpose — `chromium_milestone` takes the former, `webrtc_branch` the latter.
-
-**`The Chromium dashboard has no WebRTC branch for milestone N.`**
-
-That milestone has not branched yet, or is old enough to have been dropped. The dashboard returns
-the JSON body `[null]` for these.
+The branch number is wrong. The commonest cause is passing a Chromium milestone (`152`) where the
+WebRTC branch (`7977`) is wanted; <https://chromiumdash.appspot.com/branches> maps one to the
+other.
 
 **Milestone shows as `unknown` in the summary.**
 

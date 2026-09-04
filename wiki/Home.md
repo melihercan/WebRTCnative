@@ -42,8 +42,8 @@ Every workflow is manual (`workflow_dispatch`). Run one from the **Actions** tab
 inputs blank; it asks the Chromium dashboard which milestone is currently stable, builds that
 milestone's WebRTC branch, and uploads the result. Expect roughly an hour.
 
-To pin a specific version instead, fill in `webrtc_branch` (e.g. `7977`) or `chromium_milestone`
-(e.g. `152`).
+To pin a specific version instead, fill in `webrtc_branch` (e.g. `7977`) — the WebRTC branch
+number, which <https://chromiumdash.appspot.com/branches> lists next to each Chromium milestone.
 
 ## Why a separate repository
 

@@ -1,7 +1,7 @@
 # Branch selection
 
-Every workflow begins by deciding which WebRTC branch to build. This page explains the rule, the
-three ways to influence it, and why two more obvious approaches are wrong.
+Every workflow begins by deciding which WebRTC branch to build. This page explains the rule, how to
+override it, and why two more obvious approaches are wrong.
 
 ## Background: WebRTC rides the Chromium train
 
@@ -57,16 +57,23 @@ existing branch-head was 8043 — a branch nobody ships.
 
 ## Overriding
 
-Two `workflow_dispatch` inputs, on every workflow:
+One `workflow_dispatch` input, on every workflow:
 
-| Input | Example | Effect |
-|---|---|---|
-| `webrtc_branch` | `7977` | Build that branch-head. Highest priority. |
-| `chromium_milestone` | `152` | Look up that milestone's WebRTC branch. |
-| *(both empty)* | | Auto-detect, as described above. |
+| `webrtc_branch` | Effect |
+|---|---|
+| *(empty)* | Auto-detect, as described above. |
+| `7977` | Build that branch-head. |
 
-`webrtc_branch` wins if both are given. To reproduce an older build, set `webrtc_branch` to the
-number recorded in that run's job summary.
+There is deliberately no separate milestone input. The mapping is one to one, so a milestone box
+would be a second way of naming the same thing — and it could not express a branch the dashboard
+no longer lists. The branch is also what the checkout actually uses, so there is no lookup between
+what you type and what gets built.
+
+The milestone is still *reported* — resolved by reverse lookup and shown in the log, the job
+summary and the artifact name — it simply is not an input.
+
+To reproduce an older build, set `webrtc_branch` to the number recorded in that run's job
+summary.
 
 ### Why the default is empty rather than a number
 
@@ -104,7 +111,6 @@ run and tested on a laptop:
 
 ```bash
 python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py
-python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --milestone 151
 python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --branch 7977
 ```
 
@@ -124,8 +130,4 @@ not track reports `unknown`, which is not an error.
 | Endpoint | Purpose |
 |---|---|
 | `/fetch_milestones` | all milestones with `schedule_phase`; drives auto-detection |
-| `/fetch_milestones?mstone=N` | one milestone; drives `chromium_milestone` |
 | `/fetch_milestones?only_branched=true` | reverse lookup of branch → milestone, for labelling |
-
-An unknown milestone returns the JSON body `[null]` rather than an empty list, which the resolver
-handles explicitly.
