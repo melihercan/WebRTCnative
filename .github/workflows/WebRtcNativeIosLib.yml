@@ -1,47 +1,129 @@
+# Builds WebRTC.xcframework for the MAUI iOS and Mac Catalyst bindings.
+#
+# The default arch list covers iOS devices, both simulator flavours and Mac
+# Catalyst, so one xcframework serves net10.0-ios and net10.0-maccatalyst.
+# Upstream's own default omits the catalyst slices.
+#
+# Valid values (from tools_webrtc/ios/build_ios_libs.py ENABLED_ARCHS):
+#   device:arm64  simulator:arm64  simulator:x64  catalyst:arm64  catalyst:x64
+# The bare aliases arm64 and x64 are also accepted but mean device-only, which
+# is what the previous version of this workflow was unintentionally requesting.
+
 name: WebRtcNativeIosLib
 
-on: workflow_dispatch
- 
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_branch:
+        description: 'WebRTC branch-head, e.g. 7977. Leave empty to build the latest stable Chromium milestone.'
+        required: false
+        default: ''
+      chromium_milestone:
+        description: 'Chromium milestone, e.g. 152. Ignored when a branch is given above.'
+        required: false
+        default: ''
+      arch:
+        description: 'Slices to build, space separated.'
+        required: false
+        default: 'device:arm64 simulator:arm64 simulator:x64 catalyst:arm64 catalyst:x64'
+      build_config:
+        description: 'Build configuration'
+        required: false
+        default: 'release'
+        type: choice
+        options: ['release', 'debug']
+
 jobs:
   build:
     runs-on: macos-latest
-     
+    timeout-minutes: 360
+
     steps:
-    - uses: actions/checkout@v3    
-    
-    - name: Create 'depot_tools'
-      run: git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-    - name: Export 'depot_tools' path
-      run: echo "${{github.workspace}}/depot_tools/" >> $GITHUB_PATH
-    - name: Execute 'gclient'
-      run: gclient
-    
-    - name: Configure Git
-      run: |
-        git config --global user.name "melihercan"
-        git config --global user.email "melihercan@gmail.com"
-        git config --global core.autocrlf false
-        git config --global core.filemode false
-        git config --global branch.autosetuprebase always
-        
-    - name: Get the code and build
-      run: |
-        pip install --upgrade setuptools
-        mkdir webrtc-checkout
-        cd webrtc-checkout
-        fetch --nohooks webrtc_ios
-        gclient sync
-        cd src
-        git checkout branch-heads/6045
-        gclient sync
-        ./tools_webrtc/ios/build_ios_libs.py --arch arm64 x64
-        #./tools_webrtc/ios/build_ios_libs.py
-    - name: Zip the libraries
-      run: |
-        ls -l webrtc-checkout/src/out_ios_libs
-        zip -vr ./out_ios_libs.zip webrtc-checkout/src/out_ios_libs/WebRTC.xcframework -x "*.DS_Store"
-    - uses: actions/upload-artifact@v3
-      with: 
-        name: iOS WebRTC libraries 
-        path: ./out_ios_libs.zip
-        
+      - uses: actions/checkout@v4
+
+      - name: Resolve WebRTC branch
+        id: webrtc
+        uses: ./.github/actions/resolve-webrtc-branch
+        with:
+          webrtc_branch: ${{ inputs.webrtc_branch }}
+          chromium_milestone: ${{ inputs.chromium_milestone }}
+
+      - name: Install depot_tools
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          # depot_tools must come first so its python and git win over the runner's.
+          echo "${GITHUB_WORKSPACE}/depot_tools" >> "$GITHUB_PATH"
+
+      - name: Bootstrap gclient
+        run: gclient
+
+      - name: Configure Git
+        run: |
+          # gclient refuses to run without an identity; this is not a commit author.
+          git config --global user.name  'github-actions'
+          git config --global user.email 'github-actions@users.noreply.github.com'
+          git config --global core.autocrlf false
+          git config --global core.filemode false
+          git config --global branch.autosetuprebase always
+
+      - name: Fetch WebRTC source
+        env:
+          BRANCH: ${{ steps.webrtc.outputs.branch }}
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/webrtc-checkout"
+          cd "$HOME/webrtc-checkout"
+          # webrtc_ios pulls the iOS-specific deps build_ios_libs.py needs.
+          fetch --nohooks webrtc_ios
+          cd src
+          git fetch origin "+refs/branch-heads/${BRANCH}:refs/remotes/branch-heads/${BRANCH}"
+          git checkout -B "webrtc-${BRANCH}" "refs/remotes/branch-heads/${BRANCH}"
+          gclient sync -D --force --reset
+          git log -1 --oneline
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --show-sdk-version
+          uname -m
+
+      - name: Build the xcframework
+        env:
+          ARCH: ${{ inputs.arch }}
+          BUILD_CONFIG: ${{ inputs.build_config || 'release' }}
+        run: |
+          set -euxo pipefail
+          cd "$HOME/webrtc-checkout/src"
+          # shellcheck disable=SC2086
+          ./tools_webrtc/ios/build_ios_libs.py \
+            --build_config "${BUILD_CONFIG}" \
+            --arch ${ARCH}
+          ls -l out_ios_libs
+
+      - name: Package the xcframework
+        run: |
+          set -euo pipefail
+          cd "$HOME/webrtc-checkout/src"
+          framework='out_ios_libs/WebRTC.xcframework'
+          if [ ! -d "$framework" ]; then
+            echo "::error::WebRTC.xcframework was not produced by the build."
+            exit 1
+          fi
+          # List the slices so the log records what actually went in.
+          ls -1 "$framework"
+          # Zip from inside out_ios_libs so the archive holds WebRTC.xcframework
+          # at its root, and use -y to keep the framework's symlinks intact --
+          # upload-artifact would otherwise dereference and corrupt the bundle.
+          cd out_ios_libs
+          zip -qry "$GITHUB_WORKSPACE/WebRTC.xcframework.zip" WebRTC.xcframework -x '*.DS_Store'
+          ls -lh "$GITHUB_WORKSPACE/WebRTC.xcframework.zip"
+
+      - name: Upload the xcframework
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-ios-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
+          path: WebRTC.xcframework.zip
+          if-no-files-found: error
+          retention-days: 30
+          # The zip is already compressed; recompressing it only wastes time.
+          compression-level: 0

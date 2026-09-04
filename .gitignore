@@ -9,3 +9,7 @@
 /WebRtcNativeObjectsWrapper/.vs
 /WebRtcInterop/.vs/WebRtcInterop/v17
 /WebRtcInterop/.vs
+
+# Python bytecode from running the branch resolver locally
+__pycache__/
+*.pyc

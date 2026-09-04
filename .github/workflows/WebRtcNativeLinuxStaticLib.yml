@@ -1,47 +1,112 @@
+# Builds the WebRTC static library (libwebrtc.a) for Linux.
+
 name: WebRtcNativeLinuxStaticLib
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_branch:
+        description: 'WebRTC branch-head, e.g. 7977. Leave empty to build the latest stable Chromium milestone.'
+        required: false
+        default: ''
+      chromium_milestone:
+        description: 'Chromium milestone, e.g. 152. Ignored when a branch is given above.'
+        required: false
+        default: ''
+      target_cpu:
+        description: 'Target CPU'
+        required: false
+        default: 'x64'
+        type: choice
+        options: ['x64', 'arm64', 'arm']
 
 jobs:
   build:
     runs-on: ubuntu-latest
-     
+    timeout-minutes: 360
+
     steps:
-    - uses: actions/checkout@v3    
-    
-    - name: Create 'depot_tools'
-      run: git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-    - name: Export 'depot_tools' path
-      run: echo "${{github.workspace}}/depot_tools/" >> $GITHUB_PATH
-    - name: Execute 'gclient'
-      run: gclient
-    
-    - name: Configure Git
-      run: |
-        git config --global user.name "melihercan"
-        git config --global user.email "melihercan@gmail.com"
-        git config --global core.autocrlf false
-        git config --global core.filemode false
-        git config --global branch.autosetuprebase always
-        
-    - name: Get the code and build
-      run: |
-        mkdir webrtc-checkout
-        cd webrtc-checkout
-        fetch --nohooks webrtc
-        gclient sync
-        cd src
-        git checkout branch-heads/5481
-        gclient sync
-        gn gen out/Default --args='is_debug=false'
-        autoninja -C out/Default
-        
-    - name: Copy WebRTC library
-      run: |
-        cp webrtc-checkout/src/out/Default/obj/libwebrtc.a .
-        
-    - uses: actions/upload-artifact@v3
-      with: 
-        name: Linux WebRTC static library (libwebrtc.a)
-        path: ./libwebrtc.a
-        
+      - uses: actions/checkout@v4
+
+      - name: Resolve WebRTC branch
+        id: webrtc
+        uses: ./.github/actions/resolve-webrtc-branch
+        with:
+          webrtc_branch: ${{ inputs.webrtc_branch }}
+          chromium_milestone: ${{ inputs.chromium_milestone }}
+
+      - name: Free disk space
+        run: |
+          # A WebRTC checkout plus build output does not fit alongside the
+          # runner's preinstalled toolchains.
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/local/.ghcup \
+                      /usr/share/swift "${AGENT_TOOLSDIRECTORY:-}" || true
+          sudo apt-get clean || true
+          df -h /
+
+      - name: Install depot_tools
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          # depot_tools must come first so its python and git win over the runner's.
+          echo "${GITHUB_WORKSPACE}/depot_tools" >> "$GITHUB_PATH"
+
+      - name: Bootstrap gclient
+        run: gclient
+
+      - name: Configure Git
+        run: |
+          # gclient refuses to run without an identity; this is not a commit author.
+          git config --global user.name  'github-actions'
+          git config --global user.email 'github-actions@users.noreply.github.com'
+          git config --global core.autocrlf false
+          git config --global core.filemode false
+          git config --global branch.autosetuprebase always
+
+      - name: Fetch WebRTC source
+        env:
+          BRANCH: ${{ steps.webrtc.outputs.branch }}
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/webrtc-checkout"
+          cd "$HOME/webrtc-checkout"
+          fetch --nohooks webrtc
+          cd src
+          git fetch origin "+refs/branch-heads/${BRANCH}:refs/remotes/branch-heads/${BRANCH}"
+          git checkout -B "webrtc-${BRANCH}" "refs/remotes/branch-heads/${BRANCH}"
+          gclient sync -D --force --reset
+          # The deps script arrives with the gclient-pulled build/ directory and
+          # has changed name across branches, so probe for it.
+          if   [ -f build/install-build-deps.py ]; then python3 build/install-build-deps.py --no-prompt || true
+          elif [ -f build/install-build-deps.sh ]; then ./build/install-build-deps.sh --no-prompt || true
+          fi
+          git log -1 --oneline
+
+      - name: Build
+        env:
+          TARGET_CPU: ${{ inputs.target_cpu || 'x64' }}
+        run: |
+          set -euxo pipefail
+          cd "$HOME/webrtc-checkout/src"
+          # Tests, tools and examples never end up in libwebrtc.a, so building
+          # them would only cost time and disk.
+          gn gen out/Default --args="is_debug=false target_os=\"linux\" target_cpu=\"${TARGET_CPU}\" rtc_include_tests=false rtc_build_tools=false rtc_build_examples=false"
+          # Name the target explicitly; the default builds the entire tree.
+          autoninja -C out/Default webrtc
+
+      - name: Collect libwebrtc.a
+        run: |
+          set -euo pipefail
+          lib="$(find "$HOME/webrtc-checkout/src/out/Default" -name 'libwebrtc.a' -print -quit)"
+          if [ -z "$lib" ]; then echo "::error::libwebrtc.a was not produced by the build."; exit 1; fi
+          ls -lh "$lib"
+          cp "$lib" "$GITHUB_WORKSPACE/libwebrtc.a"
+
+      - name: Upload libwebrtc.a
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-linux-${{ inputs.target_cpu || 'x64' }}-static-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
+          path: libwebrtc.a
+          if-no-files-found: error
+          retention-days: 30

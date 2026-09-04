@@ -1,68 +1,133 @@
-## !!!IMPORTANT!!! Using C: drive as default D: has only 14BG available space
+# Builds the WebRTC static library (webrtc.lib) for Windows.
+#
+# !!! IMPORTANT !!! Everything is kept on C:. The hosted runner's D: drive has
+# roughly 14 GB free, and a WebRTC checkout does not come close to fitting.
 
 name: WebRtcNativeWindowsStaticLib
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_branch:
+        description: 'WebRTC branch-head, e.g. 7977. Leave empty to build the latest stable Chromium milestone.'
+        required: false
+        default: ''
+      chromium_milestone:
+        description: 'Chromium milestone, e.g. 152. Ignored when a branch is given above.'
+        required: false
+        default: ''
+      target_cpu:
+        description: 'Target CPU'
+        required: false
+        default: 'x64'
+        type: choice
+        options: ['x64', 'x86', 'arm64']
 
 env:
+  # Build with the Visual Studio installed on the runner rather than Google's
+  # internal toolchain, which we have no access to.
   DEPOT_TOOLS_WIN_TOOLCHAIN: 0
   GYP_GENERATORS: msvs-ninja,ninja
-  GYP_MSVS_OVERRIDE_PATH: C:\Program Files\Microsoft Visual Studio\2022\Enterprise
-  vs2022_install: C:\Program Files\Microsoft Visual Studio\2022\Enterprise
   GYP_MSVS_VERSION: 2022
-  PYTHON_BIN_ABSDIR: C:\hostedtoolcache\windows\Python\3.9.13\x64
-  
+  DEPOT_TOOLS_DIR: C:\depot_tools
+  CHECKOUT_DIR: C:\webrtc-checkout
+
 jobs:
   build:
     runs-on: windows-latest
-     
+    timeout-minutes: 360
+
     steps:
-    - uses: actions/checkout@v3    
-    
-    - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v1.1  
-      with:
-        msbuild-architecture: x64
-    
-    - name: Create 'depot_tools' folder
-      run: |
-        mkdir c:\depot_tools
-        cd c:\depot_tools
-        Invoke-WebRequest -Uri "https://storage.googleapis.com/chrome-infra/depot_tools.zip" -OutFile .\depot_tools.zip
-        7z x -y depot_tools.zip
-        del depot_tools.zip
-    - name: Export 'depot_tools' path
-      run: Add-Content $env:GITHUB_PATH c:\depot_tools
-    - name: Execute 'gclient'
-      shell: powershell
-      run: gclient
-    
-    - name: Configure Git
-      run: |
-        git config --global user.name "melihercan"
-        git config --global user.email "melihercan@gmail.com"
-        git config --global core.autocrlf false
-        git config --global core.filemode false
-        git config --global branch.autosetuprebase always
-        
-    - name: Get the code and build
-      run: |
-        mkdir c:\webrtc-checkout
-        cd c:\webrtc-checkout
-        fetch --nohooks webrtc
-        gclient sync
-        cd src
-        git checkout branch-heads/5481
-        gclient sync
-        gn gen out/Default --args='is_debug=false'
-        autoninja -C out/Default
-        
-    - name: Copy WebRTC library
-      run: |
-        copy c:\webrtc-checkout\src\out\Default\obj\webrtc.lib .
-        
-    - uses: actions/upload-artifact@v3
-      with: 
-        name: Windows WebRTC static library (webrtc.lib)
-        path: .\webrtc.lib
-        
+      - uses: actions/checkout@v4
+
+      - name: Resolve WebRTC branch
+        id: webrtc
+        uses: ./.github/actions/resolve-webrtc-branch
+        with:
+          webrtc_branch: ${{ inputs.webrtc_branch }}
+          chromium_milestone: ${{ inputs.chromium_milestone }}
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
+
+      - name: Locate Visual Studio
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $install = & $vswhere -latest -products * -property installationPath
+          if (-not $install) { throw 'vswhere could not find a Visual Studio installation.' }
+          Write-Host "Visual Studio: $install"
+          "GYP_MSVS_OVERRIDE_PATH=$install" | Out-File $env:GITHUB_ENV -Append
+          "vs2022_install=$install"         | Out-File $env:GITHUB_ENV -Append
+
+      - name: Install depot_tools
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:DEPOT_TOOLS_DIR | Out-Null
+          $zip = Join-Path $env:DEPOT_TOOLS_DIR 'depot_tools.zip'
+          Invoke-WebRequest -Uri 'https://storage.googleapis.com/chrome-infra/depot_tools.zip' -OutFile $zip
+          7z x -y "-o$env:DEPOT_TOOLS_DIR" $zip
+          Remove-Item $zip
+          # depot_tools must come first so its python and git win over the runner's.
+          $env:DEPOT_TOOLS_DIR | Out-File $env:GITHUB_PATH -Append
+          & (Join-Path $env:DEPOT_TOOLS_DIR 'gclient.bat')
+
+      - name: Configure Git
+        shell: pwsh
+        run: |
+          # gclient refuses to run without an identity; this is not a commit author.
+          git config --global user.name  'github-actions'
+          git config --global user.email 'github-actions@users.noreply.github.com'
+          git config --global core.autocrlf false
+          git config --global core.filemode false
+          git config --global branch.autosetuprebase always
+
+      - name: Fetch WebRTC source
+        shell: pwsh
+        env:
+          BRANCH: ${{ steps.webrtc.outputs.branch }}
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:CHECKOUT_DIR | Out-Null
+          Set-Location $env:CHECKOUT_DIR
+          fetch --nohooks webrtc
+          Set-Location (Join-Path $env:CHECKOUT_DIR 'src')
+          $branch = $env:BRANCH
+          git fetch origin ('+refs/branch-heads/{0}:refs/remotes/branch-heads/{0}' -f $branch)
+          git checkout -B "webrtc-$branch" "refs/remotes/branch-heads/$branch"
+          gclient sync -D --force --reset
+          git log -1 --oneline
+
+      - name: Build
+        shell: pwsh
+        env:
+          TARGET_CPU: ${{ inputs.target_cpu || 'x64' }}
+        run: |
+          Set-Location (Join-Path $env:CHECKOUT_DIR 'src')
+          # Tests, tools and examples never end up in webrtc.lib, so building them
+          # would only cost time and the disk space this runner does not have.
+          $gnArgs = 'is_debug=false target_os="win" target_cpu="{0}" ' +
+                    'rtc_include_tests=false rtc_build_tools=false rtc_build_examples=false'
+          $gnArgs = $gnArgs -f $env:TARGET_CPU
+          Write-Host "gn args: $gnArgs"
+          gn gen out/Default --args="$gnArgs"
+          # Name the target explicitly; the default builds the entire tree.
+          autoninja -C out/Default webrtc
+
+      - name: Collect webrtc.lib
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:CHECKOUT_DIR 'src\out\Default'
+          $lib = Get-ChildItem -Path $out -Filter 'webrtc.lib' -Recurse | Select-Object -First 1
+          if (-not $lib) { throw 'webrtc.lib was not produced by the build.' }
+          Write-Host ('Found {0} ({1} MB)' -f $lib.FullName, [math]::Round($lib.Length / 1MB, 1))
+          Copy-Item $lib.FullName (Join-Path $env:GITHUB_WORKSPACE 'webrtc.lib')
+
+      - name: Upload webrtc.lib
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-windows-${{ inputs.target_cpu || 'x64' }}-static-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
+          path: webrtc.lib
+          if-no-files-found: error
+          retention-days: 30

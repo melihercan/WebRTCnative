@@ -1,59 +1,132 @@
+# Builds the WebRTC shared library (libwebrtc.dylib) for macOS.
+#
+# WebRTC only ships static libraries. The "Patch for a shared library" step below
+# rewrites the build files so a component build is possible; see the wiki page
+# "Shared library patch" for what each edit does and why.
+#
+# macos-latest is Apple silicon, so arm64 is the default target. Pick x64 to
+# produce a library for Intel Macs.
+
 name: WebRtcNativeMacOsSharedLib
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_branch:
+        description: 'WebRTC branch-head, e.g. 7977. Leave empty to build the latest stable Chromium milestone.'
+        required: false
+        default: ''
+      chromium_milestone:
+        description: 'Chromium milestone, e.g. 152. Ignored when a branch is given above.'
+        required: false
+        default: ''
+      target_cpu:
+        description: 'Target CPU'
+        required: false
+        default: 'arm64'
+        type: choice
+        options: ['arm64', 'x64']
 
-##env:
-  ##DEPOT_TOOLS_WIN_TOOLCHAIN: 0
-  ##GYP_GENERATORS: msvs-ninja,ninja
-  ##GYP_MSVS_OVERRIDE_PATH: C:\Program Files\Microsoft Visual Studio\2022\Enterprise
-  ##vs2022_install: C:\Program Files\Microsoft Visual Studio\2022\Enterprise
-  ##GYP_MSVS_VERSION: 2022
-  ##PYTHON_BIN_ABSDIR: C:\hostedtoolcache\windows\Python\3.9.13\x64
-  ##PATH: $GITHUB_WORKSPACE/depot_tools:$PATH
-  
 jobs:
   build:
     runs-on: macos-latest
-     
+    timeout-minutes: 360
+
     steps:
-    - uses: actions/checkout@v3    
-    
-    - name: Create 'depot_tools'
-      run: git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-    - name: Export 'depot_tools' path
-      run: echo "${{github.workspace}}/depot_tools/" >> $GITHUB_PATH
-    - name: Execute 'gclient'
-      run: gclient
-    
-    - name: Configure Git
-      run: |
-        git config --global user.name "melihercan"
-        git config --global user.email "melihercan@gmail.com"
-        git config --global core.autocrlf false
-        git config --global core.filemode false
-        git config --global branch.autosetuprebase always
-        
-    - name: Get the code, patch and build
-      run: |
-        mkdir webrtc-checkout
-        cd webrtc-checkout
-        fetch --nohooks webrtc
-        gclient sync
-        cd src
-        git checkout branch-heads/5481
-        gclient sync
-        sed -i '' 's/rtc_static_library/rtc_shared_library/g' BUILD.gn
-        sed -i '' '/complete_static_lib/d' BUILD.gn
-        sed -i '' 's/!build_with_chromium && is_component_build/false/g' webrtc.gni
-        sed -i '' '/:frame_analyzer/d' rtc_tools/BUILD.gn        
-        gn gen out/Default --args="is_debug=false is_component_build=true rtc_enable_symbol_export=true rtc_include_tests=false rtc_build_tools=false rtc_build_examples=false"
-        autoninja -C out/Default
-        
-    - name: Copy WebRTC library
-      run: |
-        cp webrtc-checkout/src/out/Default/libwebrtc.dylib .
-        
-    - uses: actions/upload-artifact@v3
-      with: 
-        name: macOS WebRTC dynamic library (libwebrtc.dylib)
-        path: ./libwebrtc.dylib
+      - uses: actions/checkout@v4
+
+      - name: Resolve WebRTC branch
+        id: webrtc
+        uses: ./.github/actions/resolve-webrtc-branch
+        with:
+          webrtc_branch: ${{ inputs.webrtc_branch }}
+          chromium_milestone: ${{ inputs.chromium_milestone }}
+
+      - name: Install depot_tools
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          # depot_tools must come first so its python and git win over the runner's.
+          echo "${GITHUB_WORKSPACE}/depot_tools" >> "$GITHUB_PATH"
+
+      - name: Bootstrap gclient
+        run: gclient
+
+      - name: Configure Git
+        run: |
+          # gclient refuses to run without an identity; this is not a commit author.
+          git config --global user.name  'github-actions'
+          git config --global user.email 'github-actions@users.noreply.github.com'
+          git config --global core.autocrlf false
+          git config --global core.filemode false
+          git config --global branch.autosetuprebase always
+
+      - name: Fetch WebRTC source
+        env:
+          BRANCH: ${{ steps.webrtc.outputs.branch }}
+        run: |
+          set -euxo pipefail
+          mkdir -p "$HOME/webrtc-checkout"
+          cd "$HOME/webrtc-checkout"
+          fetch --nohooks webrtc
+          cd src
+          git fetch origin "+refs/branch-heads/${BRANCH}:refs/remotes/branch-heads/${BRANCH}"
+          git checkout -B "webrtc-${BRANCH}" "refs/remotes/branch-heads/${BRANCH}"
+          gclient sync -D --force --reset
+          git log -1 --oneline
+
+      - name: Patch for a shared library
+        run: |
+          set -euo pipefail
+          cd "$HOME/webrtc-checkout/src"
+
+          # Assert before editing. If upstream renames something this fails loudly
+          # here rather than quietly producing a static build an hour later.
+          assert_contains() {
+            if ! grep -qF -- "$2" "$1"; then
+              echo "::error::Expected to find '$2' in $1. The shared-library patch needs updating for this WebRTC branch."
+              exit 1
+            fi
+          }
+          assert_contains BUILD.gn          'rtc_static_library'
+          assert_contains BUILD.gn          'complete_static_lib'
+          assert_contains webrtc.gni        '!build_with_chromium && is_component_build'
+          assert_contains rtc_tools/BUILD.gn ':frame_analyzer'
+
+          # macOS ships BSD sed: -i requires an explicit (here empty) backup
+          # suffix. Dropping the '' turns the next token into the suffix and the
+          # edits silently go to the wrong place.
+          # 1. emit shared libraries instead of static ones
+          sed -i '' 's/rtc_static_library/rtc_shared_library/g' BUILD.gn
+          # 2. complete_static_lib is meaningless for a shared library
+          sed -i '' '/complete_static_lib/d' BUILD.gn
+          # 3. stop webrtc.gni suppressing the component build outside Chromium
+          sed -i '' 's/!build_with_chromium && is_component_build/false/g' webrtc.gni
+          # 4. frame_analyzer does not link under a component build
+          sed -i '' '/:frame_analyzer/d' rtc_tools/BUILD.gn
+
+      - name: Build
+        env:
+          TARGET_CPU: ${{ inputs.target_cpu || 'arm64' }}
+        run: |
+          set -euxo pipefail
+          cd "$HOME/webrtc-checkout/src"
+          gn gen out/Default --args="is_debug=false target_os=\"mac\" target_cpu=\"${TARGET_CPU}\" is_component_build=true rtc_enable_symbol_export=true rtc_include_tests=false rtc_build_tools=false rtc_build_examples=false"
+          # Name the target explicitly; the default builds the entire tree.
+          autoninja -C out/Default webrtc
+
+      - name: Collect libwebrtc.dylib
+        run: |
+          set -euo pipefail
+          lib="$(find "$HOME/webrtc-checkout/src/out/Default" -maxdepth 1 -name 'libwebrtc.dylib' -print -quit)"
+          if [ -z "$lib" ]; then echo "::error::libwebrtc.dylib was not produced by the build."; exit 1; fi
+          ls -lh "$lib"
+          lipo -info "$lib" || true
+          cp "$lib" "$GITHUB_WORKSPACE/libwebrtc.dylib"
+
+      - name: Upload libwebrtc.dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-macos-${{ inputs.target_cpu || 'arm64' }}-shared-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
+          path: libwebrtc.dylib
+          if-no-files-found: error
+          retention-days: 30
