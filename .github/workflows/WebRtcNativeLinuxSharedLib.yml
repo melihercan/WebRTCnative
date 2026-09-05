@@ -98,6 +98,7 @@ jobs:
           assert_contains BUILD.gn          'rtc_static_library'
           assert_contains BUILD.gn          'complete_static_lib'
           assert_contains webrtc.gni        '!build_with_chromium && is_component_build'
+          assert_contains webrtc.gni        'if (build_with_chromium && defined(deps))'
           assert_contains rtc_tools/BUILD.gn ':frame_analyzer'
 
           # 1. emit shared libraries instead of static ones
@@ -108,6 +109,12 @@ jobs:
           sed -i 's/!build_with_chromium && is_component_build/false/g' webrtc.gni
           # 4. frame_analyzer does not link under a component build
           sed -i '/:frame_analyzer/d' rtc_tools/BUILD.gn
+          # 5. Route every Abseil dependency to //third_party/abseil-cpp:absl.
+          #    WebRTC only does this when built inside Chromium; standalone it
+          #    depends on fine-grained absl targets, which a component build
+          #    compiles into absl.dll *and* links directly as source_sets, so
+          #    the link dies on duplicate symbols like kDefaultIterControl.
+          sed -i 's/if (build_with_chromium && defined(deps))/if (defined(deps))/g' webrtc.gni
 
       - name: Build
         env:
@@ -122,15 +129,22 @@ jobs:
       - name: Collect libwebrtc.so
         run: |
           set -euo pipefail
-          lib="$(find "$HOME/webrtc-checkout/src/out/Default" -maxdepth 1 -name 'libwebrtc.so' -print -quit)"
-          if [ -z "$lib" ]; then echo "::error::libwebrtc.so was not produced by the build."; exit 1; fi
-          ls -lh "$lib"
-          cp "$lib" "$GITHUB_WORKSPACE/libwebrtc.so"
+          out="$HOME/webrtc-checkout/src/out/Default"
+          staging="$GITHUB_WORKSPACE/webrtc-so"
+          mkdir -p "$staging"
+          if [ ! -f "$out/libwebrtc.so" ]; then
+            echo "::error::libwebrtc.so was not produced by the build."; exit 1
+          fi
+          # A component build deliberately splits the tree across many shared
+          # objects, so libwebrtc.so on its own will not load. Ship them all.
+          find "$out" -maxdepth 1 -name '*.so' -exec cp {} "$staging/" \;
+          ls -lh "$staging"
+          echo "Collected $(find "$staging" -type f | wc -l) files"
 
       - name: Upload libwebrtc.so
         uses: actions/upload-artifact@v4
         with:
           name: webrtc-linux-${{ inputs.target_cpu || 'x64' }}-shared-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
-          path: libwebrtc.so
+          path: webrtc-so/
           if-no-files-found: error
           retention-days: 30

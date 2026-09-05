@@ -7,7 +7,7 @@ Three workflows — `WindowsDynamicLib`, `LinuxSharedLib`, `MacOsSharedLib` — 
 in place before generating build files. This is the part of the repository with the least margin
 for error, so it is documented in full.
 
-## The four edits
+## The five edits
 
 All are applied to the WebRTC checkout at `src/`, after the branch is checked out and synced, and
 before `gn gen`.
@@ -36,12 +36,12 @@ for a shared library, and GN rejects it on a `shared_library` target.
 webrtc.gni:  !build_with_chromium && is_component_build  →  false
 ```
 
-Line 16 of `webrtc.gni` guards a block that deliberately disables component builds when WebRTC is
-built standalone. Since we *are* building standalone and *do* want a component build, the guard is
-forced to `false`.
+Line 16 of `webrtc.gni` guards a `print` and an `assert(!is_component_build, "Component builds
+are not supported in WebRTC.")`. Forcing the condition to `false` disables that refusal.
 
-This is the edit that makes the difference between a genuine shared library and a shared-looking
-one that still statically links everything.
+Worth being clear about what this means: component builds are genuinely unsupported upstream, and
+edit 5 exists because of a real consequence of overriding that. Treat the whole patch as living
+outside what WebRTC tests.
 
 ### 4. Remove the `frame_analyzer` dependency
 
@@ -51,6 +51,33 @@ rtc_tools/BUILD.gn:  delete every line containing ':frame_analyzer'
 
 `frame_analyzer` does not link under a component build. It is a developer tool, absent from the
 shipped library, so removing the dependency costs nothing.
+
+### 5. Route every Abseil dependency through the single `absl` target
+
+```
+webrtc.gni:  if (build_with_chromium && defined(deps))  ->  if (defined(deps))
+```
+
+Five templates in `webrtc.gni` contain a block that rewrites any dependency on
+`//third_party/abseil-cpp/*` into a single dependency on `//third_party/abseil-cpp:absl`. WebRTC
+only applies it when built **inside Chromium**.
+
+Standalone, WebRTC therefore depends on fine-grained Abseil targets such as
+`//third_party/abseil-cpp/absl/container:raw_hash_set`, which are `source_set`s and link directly
+into whatever depends on them. Under a component build `//third_party/abseil-cpp:absl` is *also*
+built as its own shared library. The final link then sees the same symbol twice:
+
+```
+lld-link: error: duplicate symbol: absl::container_internal::kDefaultIterControl
+>>> defined at obj/third_party/abseil-cpp/absl/container/raw_hash_set/raw_hash_set.obj
+>>> defined at third_party_abseil-cpp_absl.dll.lib(third_party_abseil-cpp_absl.dll)
+```
+
+Dropping the `build_with_chromium` guard makes the standalone build route Abseil the same way
+Chromium does, so there is exactly one copy.
+
+This surfaces at the very end of the build — 3429 of 3430 targets complete — because it is a link
+error in the final artifact.
 
 ## Then generate with component-build arguments
 
@@ -77,6 +104,7 @@ sed -i 's/rtc_static_library/rtc_shared_library/g' BUILD.gn
 sed -i '/complete_static_lib/d' BUILD.gn
 sed -i 's/!build_with_chromium && is_component_build/false/g' webrtc.gni
 sed -i '/:frame_analyzer/d' rtc_tools/BUILD.gn
+sed -i 's/if (build_with_chromium && defined(deps))/if (defined(deps))/g' webrtc.gni
 ```
 
 **macOS** — BSD sed, where `-i` requires a backup suffix:
@@ -86,6 +114,7 @@ sed -i '' 's/rtc_static_library/rtc_shared_library/g' BUILD.gn
 sed -i '' '/complete_static_lib/d' BUILD.gn
 sed -i '' 's/!build_with_chromium && is_component_build/false/g' webrtc.gni
 sed -i '' '/:frame_analyzer/d' rtc_tools/BUILD.gn
+sed -i '' 's/if (build_with_chromium && defined(deps))/if (defined(deps))/g' webrtc.gni
 ```
 
 > **The empty `''` is not optional.** Without it BSD sed takes the next argument as the backup
@@ -99,6 +128,7 @@ sed -i '' '/:frame_analyzer/d' rtc_tools/BUILD.gn
 (Get-Content BUILD.gn) -notmatch 'complete_static_lib' | Set-Content BUILD.gn
 (Get-Content webrtc.gni).replace('!build_with_chromium && is_component_build', 'false') | Set-Content webrtc.gni
 (Get-Content rtc_tools\BUILD.gn) -notmatch ':frame_analyzer' | Set-Content rtc_tools\BUILD.gn
+(Get-Content webrtc.gni).replace('if (build_with_chromium && defined(deps))', 'if (defined(deps))') | Set-Content webrtc.gni
 ```
 
 `.replace()` is the .NET string method — ordinal, not a regex, so `!` and `&&` need no escaping.
@@ -116,12 +146,22 @@ So each workflow asserts every anchor exists **before** editing:
 assert_contains BUILD.gn           'rtc_static_library'
 assert_contains BUILD.gn           'complete_static_lib'
 assert_contains webrtc.gni         '!build_with_chromium && is_component_build'
+assert_contains webrtc.gni         'if (build_with_chromium && defined(deps))'
 assert_contains rtc_tools/BUILD.gn ':frame_analyzer'
 ```
 
 A missing anchor stops the run immediately with a message saying the patch needs updating for that
 WebRTC branch. That is the intended signal when upstream refactors: fix the patch, do not remove
 the assertion.
+
+## A component build is many libraries, not one
+
+`is_component_build=true` means what it says: the tree is split across separate shared libraries,
+so the output directory holds `absl.dll`, `boringssl.dll` and others beside `webrtc.dll`.
+`webrtc.dll` alone will not load.
+
+The collect steps therefore gather **every** `.dll` / `.so` / `.dylib` next to the main library,
+not just the one. Anything consuming these needs the whole set on its library search path.
 
 ## Verifying the result
 
@@ -150,7 +190,7 @@ An empty export table means edit 3 or `rtc_enable_symbol_export` did not take ef
 
 ## Keeping it working across branches
 
-The patch is deliberately narrow — four anchors — so a break is easy to diagnose. Verify against a
+The patch is deliberately narrow — five anchors — so a break is easy to diagnose. Verify against a
 new branch before assuming:
 
 ```bash
@@ -161,7 +201,7 @@ curl -s "https://webrtc.googlesource.com/src/+/$B/BUILD.gn?format=TEXT" | base64
   | grep -c 'rtc_static_library'
 ```
 
-All four anchors are present in `branch-heads/7977` (Chromium M152).
+All five anchors are present in `branch-heads/7977` (Chromium M152).
 
 ## Credit
 

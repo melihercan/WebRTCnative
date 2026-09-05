@@ -133,16 +133,23 @@ jobs:
           Assert-Match 'BUILD.gn'           'rtc_static_library'                         'rtc_static_library'
           Assert-Match 'BUILD.gn'           'complete_static_lib'                        'complete_static_lib'
           Assert-Match 'webrtc.gni'         '!build_with_chromium && is_component_build' 'the component_build guard'
+          Assert-Match 'webrtc.gni'         'if (build_with_chromium && defined(deps))'  'the Chromium-gated Abseil remap'
           Assert-Match 'rtc_tools\BUILD.gn' ':frame_analyzer'                            'the frame_analyzer dependency'
 
           # 1. emit shared libraries instead of static ones
           (Get-Content BUILD.gn).replace('rtc_static_library', 'rtc_shared_library') | Set-Content BUILD.gn
           # 2. complete_static_lib is meaningless for a shared library
           (Get-Content BUILD.gn) -notmatch 'complete_static_lib' | Set-Content BUILD.gn
-          # 3. stop webrtc.gni suppressing the component build outside Chromium
+          # 3. stop webrtc.gni asserting that component builds are unsupported
           (Get-Content webrtc.gni).replace('!build_with_chromium && is_component_build', 'false') | Set-Content webrtc.gni
           # 4. frame_analyzer does not link under a component build
           (Get-Content rtc_tools\BUILD.gn) -notmatch ':frame_analyzer' | Set-Content rtc_tools\BUILD.gn
+          # 5. Route every Abseil dependency to //third_party/abseil-cpp:absl.
+          #    WebRTC only does this when built inside Chromium; standalone it
+          #    depends on fine-grained absl targets, which a component build
+          #    compiles into absl.dll *and* links directly as source_sets. The
+          #    link then dies on duplicate symbols such as kDefaultIterControl.
+          (Get-Content webrtc.gni).replace('if (build_with_chromium && defined(deps))', 'if (defined(deps))') | Set-Content webrtc.gni
 
       - name: Build
         shell: pwsh
@@ -187,27 +194,37 @@ jobs:
       - name: Collect webrtc.dll
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $out = Join-Path $env:CHECKOUT_DIR 'src\out\Default'
-          $dll = Get-ChildItem -Path $out -Filter 'webrtc.dll' -Recurse | Select-Object -First 1
-          if (-not $dll) { throw 'webrtc.dll was not produced by the build.' }
-          Write-Host ('Found {0} ({1} MB)' -f $dll.FullName, [math]::Round($dll.Length / 1MB, 1))
-          Copy-Item $dll.FullName (Join-Path $env:GITHUB_WORKSPACE 'webrtc.dll')
+          $staging = Join-Path $env:GITHUB_WORKSPACE 'webrtc-dll'
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
-          # The import library is what a C/C++ caller links against.
-          $imp = Get-ChildItem -Path $out -Filter 'webrtc.dll.lib' -Recurse | Select-Object -First 1
-          if ($imp) { Copy-Item $imp.FullName (Join-Path $env:GITHUB_WORKSPACE 'webrtc.dll.lib') }
+          if (-not (Test-Path (Join-Path $out 'webrtc.dll'))) {
+            throw 'webrtc.dll was not produced by the build.'
+          }
 
-          # Symbols make crash dumps from P/Invoke callers readable.
-          $pdb = Get-ChildItem -Path $out -Filter 'webrtc.dll.pdb' -Recurse | Select-Object -First 1
-          if ($pdb) { Copy-Item $pdb.FullName (Join-Path $env:GITHUB_WORKSPACE 'webrtc.dll.pdb') }
+          # A component build deliberately splits the tree across many DLLs --
+          # absl.dll, boringssl.dll and friends -- so webrtc.dll on its own will
+          # not load. Ship every runtime DLL that landed beside it.
+          Get-ChildItem -Path $out -Filter '*.dll' -File | Copy-Item -Destination $staging
+
+          # webrtc.dll.lib is the import library a C/C++ caller links against
+          # (P/Invoke does not need it); the PDB makes native crash dumps from
+          # P/Invoke callers readable.
+          foreach ($extra in 'webrtc.dll.lib', 'webrtc.dll.pdb') {
+            $path = Join-Path $out $extra
+            if (Test-Path $path) { Copy-Item $path $staging }
+          }
+
+          Get-ChildItem $staging |
+            Select-Object Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 2) } } |
+            Format-Table -AutoSize
+          Write-Host ('Collected {0} files' -f (Get-ChildItem $staging).Count)
 
       - name: Upload webrtc.dll
         uses: actions/upload-artifact@v4
         with:
           name: webrtc-windows-${{ inputs.target_cpu || 'x64' }}-dynamic-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
-          path: |
-            webrtc.dll
-            webrtc.dll.lib
-            webrtc.dll.pdb
+          path: webrtc-dll/
           if-no-files-found: error
           retention-days: 30
