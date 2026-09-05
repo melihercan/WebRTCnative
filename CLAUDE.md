@@ -1,4 +1,8 @@
-# WebRTCnative
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
 
 CI-only repository that **builds the Google WebRTC native libraries** (from
 [webrtc.googlesource.com](https://webrtc.googlesource.com/src/)) for desktop and mobile and
@@ -13,6 +17,56 @@ Those artifacts are the input to the sibling repo `C:\dev\WebRTCme`: desktop sha
 Extensive documentation lives in `wiki/` (published to the GitHub wiki). **Read the relevant page
 before changing a workflow** — most of the non-obvious decisions are recorded there rather than in
 comments.
+
+## Commands
+
+There is no compiler, package manager or test runner in this repository — the build happens on
+GitHub's runners. These are the commands that actually apply.
+
+**Dispatch a build** (the only way to build; see "You cannot run these builds locally" below):
+
+```powershell
+gh workflow run WebRtcNativeLinuxStaticLib.yml
+gh workflow run WebRtcNativeIosLib.yml -f webrtc_branch=7977
+gh run watch
+gh run download <run-id>
+```
+
+**Run the branch resolver** — the one component that is testable off CI:
+
+```powershell
+python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py
+python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --branch 7977
+python -m py_compile .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py
+```
+
+> On this machine `python` is the MSYS2 build, which ships no CA bundle, so the resolver's HTTPS
+> calls die with `CERTIFICATE_VERIFY_FAILED`. Point it at one first — the failure looks like a bug
+> in the script and is not:
+> ```powershell
+> $env:SSL_CERT_FILE = 'C:\msys64\usr\ssl\certs\ca-bundle.crt'
+> ```
+> CI is unaffected; the runner images have proper certificates.
+
+**Check a workflow parses** (nearest thing to a lint — `actionlint` is not installed):
+
+```powershell
+npx --yes js-yaml .github/workflows/WebRtcNativeAndroidLib.yml
+```
+
+**Format C/C++** (Chromium style; needs `dos2unix` and `clang-format` on `PATH`):
+
+```powershell
+bash WebRtcInterop/format.sh
+```
+
+**Publish the wiki** after editing `wiki/`:
+
+```powershell
+git clone https://github.com/melihercan/WebRTCnative.wiki.git
+cp wiki/*.md WebRTCnative.wiki/
+cd WebRTCnative.wiki; git add -A; git commit -m "Update wiki"; git push
+```
 
 ## Layout
 
@@ -59,12 +113,8 @@ The resolver validates the branch with `git ls-remote` before any build starts, 
 `branch` / `milestone` / `source` outputs plus a job summary. Dashboard responses are guarded for
 non-dict entries: an unknown milestone comes back as `[null]`, not `[]`.
 
-It is a standalone script so it can be tested off CI:
-
-```powershell
-python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py
-python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --branch 7977
-```
+It is deliberately a standalone script rather than inline shell, so it can be run and tested off
+CI before you touch resolution logic (see Commands).
 
 ## The workflows
 
@@ -130,8 +180,9 @@ macOS), PowerShell `(Get-Content …).replace(…)` / `-notmatch`.
 - **The resolver is the one thing that is locally testable** — run it directly (see above) before
   changing resolution logic.
 - Validate YAML edits by reading and parsing, not by executing. There is no test suite, linter or
-  package manifest. `npx --yes js-yaml <file>` is a quick parse check; Node is available on this
-  machine, `jq` and `pip` are not.
+  package manifest, and no `dotnet test` coverage despite the sibling repo being .NET. Node is
+  available on this machine; `jq` and `pip` are not, which is why the resolver is stdlib-only
+  Python and the parse check goes through `npx`.
 - Actions are pinned to `actions/checkout@v4`, `actions/upload-artifact@v4`,
   `microsoft/setup-msbuild@v2`. v3 of upload-artifact was retired by GitHub and fails immediately —
   do not downgrade.
@@ -141,8 +192,6 @@ macOS), PowerShell `(Get-Content …).replace(…)` / `-notmatch`.
   `autoninja -C out/Default` builds the whole tree, which the runners do not have time or disk for.
 - The `git config --global user.name/email` in each workflow only exists to keep `gclient` happy;
   it is a bot identity, not a commit author for this repo.
-- Keep C/C++ formatted with `WebRtcInterop/.clang-format` (Chromium style) via
-  `WebRtcInterop/format.sh`; it needs `dos2unix` and `clang-format` on `PATH`.
 - **Update `wiki/` in the same change as the workflow it documents.**
 
 ## Notes
