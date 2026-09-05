@@ -25,10 +25,12 @@ on:
 
 env:
   # Build with the Visual Studio installed on the runner rather than Google's
-  # internal toolchain, which we have no access to.
+  # internal toolchain, which we have no access to. This is the one switch that
+  # matters; GYP_MSVS_VERSION and GYP_GENERATORS used to sit here too, but they
+  # are GYP-era and vs_toolchain.py never reads them -- it detects the version
+  # itself, which is why a stale "2022" here went unnoticed against a VS 18
+  # runner.
   DEPOT_TOOLS_WIN_TOOLCHAIN: 0
-  GYP_GENERATORS: msvs-ninja,ninja
-  GYP_MSVS_VERSION: 2022
   DEPOT_TOOLS_DIR: C:\depot_tools
   CHECKOUT_DIR: C:\webrtc-checkout
 
@@ -54,12 +56,29 @@ jobs:
       - name: Locate Visual Studio
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           $install = & $vswhere -latest -products * -property installationPath
+          $version = & $vswhere -latest -products * -property installationVersion
           if (-not $install) { throw 'vswhere could not find a Visual Studio installation.' }
-          Write-Host "Visual Studio: $install"
+
+          # Chromium's build/vs_toolchain.py identifies releases by year and
+          # reads vs<year>_install. The runners now ship VS 18, which it calls
+          # 2026, so the vs2022_install this step used to export was never read.
+          # It also falls back to scanning %ProgramFiles%, so this is an
+          # optimisation rather than a requirement: an unmapped version warns
+          # instead of failing.
+          $year = switch ([int]$version.Split('.')[0]) {
+            18 { '2026' } 17 { '2022' } 16 { '2019' } default { '' }
+          }
+          Write-Host "Visual Studio $version at $install"
           "GYP_MSVS_OVERRIDE_PATH=$install" | Out-File $env:GITHUB_ENV -Append
-          "vs2022_install=$install"         | Out-File $env:GITHUB_ENV -Append
+          if ($year) {
+            Write-Host "Exporting vs${year}_install"
+            "vs${year}_install=$install" | Out-File $env:GITHUB_ENV -Append
+          } else {
+            Write-Host "::warning::Visual Studio $version has no known Chromium year mapping; relying on path detection."
+          }
 
       - name: Install depot_tools
         shell: pwsh
@@ -130,15 +149,40 @@ jobs:
         env:
           TARGET_CPU: ${{ inputs.target_cpu || 'x64' }}
         run: |
+          $ErrorActionPreference = 'Stop'
           Set-Location (Join-Path $env:CHECKOUT_DIR 'src')
-          $gnArgs = 'is_debug=false target_os="win" target_cpu="{0}" is_component_build=true ' +
-                    'rtc_enable_symbol_export=true rtc_include_tests=false ' +
-                    'rtc_build_tools=false rtc_build_examples=false'
-          $gnArgs = $gnArgs -f $env:TARGET_CPU
-          Write-Host "gn args: $gnArgs"
-          gn gen out/Default --args="$gnArgs"
+
+          # The arguments go into args.gn rather than gn gen --args="...".
+          # PowerShell strips the inner double quotes when passing a string to a
+          # native command, so gn saw target_os=win instead of target_os="win"
+          # and rejected it as an undefined identifier. Writing the file avoids
+          # native-command quoting entirely.
+          New-Item -ItemType Directory -Force -Path out/Default | Out-Null
+          $gnArgs = @(
+            'is_debug = false',
+            'target_os = "win"',
+            "target_cpu = `"$($env:TARGET_CPU)`"",
+            # These two are what turn the patched tree into a real DLL with a
+            # populated export table.
+            'is_component_build = true',
+            'rtc_enable_symbol_export = true',
+            'rtc_include_tests = false',
+            'rtc_build_tools = false',
+            'rtc_build_examples = false'
+          )
+          Set-Content -Path out/Default/args.gn -Value $gnArgs -Encoding utf8
+          Write-Host '--- args.gn ---'
+          Get-Content out/Default/args.gn
+
+          # pwsh does not fail a step when a native command exits non-zero, so
+          # check explicitly. Without this a gn failure was reported later as a
+          # confusing "build.ninja not found" from ninja.
+          gn gen out/Default
+          if ($LASTEXITCODE -ne 0) { throw "gn gen failed with exit code $LASTEXITCODE" }
+
           # Name the target explicitly; the default builds the entire tree.
           autoninja -C out/Default webrtc
+          if ($LASTEXITCODE -ne 0) { throw "autoninja failed with exit code $LASTEXITCODE" }
 
       - name: Collect webrtc.dll
         shell: pwsh
