@@ -85,8 +85,20 @@ typedef int32_t rtc_status;
 #define RTC_ERR_INTERNAL      -5
 ```
 
-The shim never throws across the boundary. Every entry point wraps its body in `try/catch(...)` and
-returns `RTC_ERR_INTERNAL`; a C++ exception unwinding into P/Invoke would terminate the process.
+**The shim is written exception-free, not exception-guarded.** WebRTC compiles with
+`-fno-exceptions`, and so does anything grafted into its build — a `try` block is a compile error:
+
+```
+error: cannot use 'try' with exceptions disabled
+```
+
+That is not a restriction to work around. With exceptions disabled nothing in the process can
+throw, so there is nothing to catch: an exception cannot unwind into P/Invoke because one cannot
+arise. Allocation that may fail uses `new (std::nothrow)` and is checked, returning
+`RTC_ERR_INTERNAL`.
+
+An earlier draft of this page prescribed wrapping every entry point in `try/catch(...)`. That was
+written before the first build and is wrong.
 
 ### Strings
 
@@ -190,7 +202,7 @@ The smallest surface that carries an audio and video call between two Windows pe
 functions, declared in `WebRtcInterop/include/Interop.h`. Everything else waits until this works
 end to end.
 
-### Library
+### Library — **implemented**
 
 ```c
 rtc_status rtc_initialize(void);
@@ -198,15 +210,20 @@ rtc_status rtc_terminate(void);
 void       rtc_string_free(char* s);
 ```
 
-`rtc_initialize` creates WebRTC's global threads; `rtc_terminate` tears them down. Call once each,
-at assembly load and unload.
+`rtc_initialize` calls `webrtc::InitializeSSL` and starts the network, worker and signalling
+threads; `rtc_terminate` stops them in reverse and cleans up SSL. Call once each, at assembly load
+and unload. Calling either twice returns `RTC_ERR_INVALID_STATE`.
 
-### Factory
+### Factory — **implemented**
 
 ```c
 rtc_status rtc_factory_create(rtc_factory** out_factory);
 void       rtc_factory_release(rtc_factory* factory);
 ```
+
+Before `rtc_initialize` it returns `RTC_ERR_INVALID_STATE`; with a null out-parameter,
+`RTC_ERR_INVALID_ARG`. `rtc_factory_release(NULL)` is a no-op, so a failed create needs no special
+case.
 
 Wraps `CreatePeerConnectionFactory` with the builtin audio and video encoder and decoder factories.
 Note that on Windows the builtin video factory means **VP8, VP9 and AV1 only** — there is no H.264
@@ -348,9 +365,11 @@ single offer/answer. Each is additive and none changes the conventions above.
   built around.
 - **The shim is platform-neutral C++.** Linux needs a new workflow, not new interop code, and
   `Bindings.Maui.Windows` becomes the template for the Linux binding.
-- **`include/Interop.h` is written to this contract**; `src/Interop.cc` is not — it predates it.
-  Treat the 2023 implementation as a build harness that works, and this header as what to implement
-  behind it.
+- **Build before believing the page.** Three things in this contract were wrong until the first
+  DLL was produced: the exception guard above, the assumption that `rtc::` names still exist (M152
+  moved everything into `namespace webrtc`), and the omission of `WEBRTC_LIBRARY_IMPL` from the GN
+  defines — without which `RTC_EXPORT` becomes `dllimport`, and lld-link rejects every call to
+  WebRTC with `LNK4217`.
 - **Verify the ownership rule with a leak test before growing the surface.** Create and release a
   thousand peer connections and watch the process working set. Getting this wrong is cheap to fix
   at twenty functions and expensive at two hundred.

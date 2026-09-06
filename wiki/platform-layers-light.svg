@@ -30,9 +30,10 @@
 <text x="662.0" y="98" fill="#1B7A4B" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="700" text-anchor="middle">●</text>
 <text x="662.0" y="116" fill="#1B7A4B" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">WebRTC.xcframework</text>
 <text x="662.0" y="129" fill="#1B7A4B" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">catalyst: only</text>
-<rect x="754" y="68" width="168" height="86" rx="3" fill="none" stroke="#DCE2E8" stroke-dasharray="4 3"/>
-<text x="838.0" y="106" fill="#78848F" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="700" text-anchor="middle">—</text>
-<text x="838.0" y="124" fill="#78848F" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">none upstream</text>
+<rect x="754" y="68" width="168" height="86" rx="3" fill="#FBF0DA" stroke="#9A6B10" stroke-dasharray="4 3"/>
+<text x="838.0" y="98" fill="#9A6B10" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="700" text-anchor="middle">◐</text>
+<text x="838.0" y="116" fill="#9A6B10" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">WebRtcInterop</text>
+<text x="838.0" y="129" fill="#9A6B10" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">ours, in progress</text>
 <rect x="930" y="68" width="168" height="86" rx="3" fill="none" stroke="#DCE2E8" stroke-dasharray="4 3"/>
 <text x="1014.0" y="106" fill="#78848F" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="700" text-anchor="middle">—</text>
 <text x="1014.0" y="124" fill="#78848F" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">none upstream</text>
@@ -91,8 +92,10 @@
 <text x="43" y="370" fill="#4A5663" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" text-anchor="start">Core — same source everywhere</text>
 <rect x="255.0" y="359" width="14" height="14" rx="3" fill="#E4F2EA" stroke="#1B7A4B"/>
 <text x="276.0" y="370" fill="#4A5663" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" text-anchor="start">Present in the artifact we build</text>
-<rect x="22" y="381" width="14" height="14" rx="3" fill="#EEEAF6" stroke="#5B4C86"/>
-<text x="43" y="392" fill="#4A5663" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" text-anchor="start">Supplied by the browser, not by us</text>
-<rect x="290.0" y="381" width="14" height="14" rx="3" fill="none" stroke="#DCE2E8" stroke-dasharray="3 2"/>
-<text x="311.0" y="392" fill="#4A5663" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" text-anchor="start">Not used on this platform</text>
+<rect x="509.0" y="359" width="14" height="14" rx="3" fill="#EEEAF6" stroke="#5B4C86"/>
+<text x="530.0" y="370" fill="#4A5663" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" text-anchor="start">Supplied by the browser, not by us</text>
+<rect x="22" y="381" width="14" height="14" rx="3" fill="#FBF0DA" stroke="#9A6B10" stroke-dasharray="3 2"/>
+<text x="43" y="392" fill="#4A5663" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" text-anchor="start">Being built here, incomplete</text>
+<rect x="248.0" y="381" width="14" height="14" rx="3" fill="none" stroke="#DCE2E8" stroke-dasharray="3 2"/>
+<text x="269.0" y="392" fill="#4A5663" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12.5" font-weight="400" text-anchor="start">Not used on this platform</text>
 </svg>

@@ -59,7 +59,7 @@ TIERS = [
             ("yes", "●", ["sdk/android", "Java + JNI"]),
             ("yes", "●", ["framework_objc", "Objective-C"]),
             ("yes", "●", ["WebRTC.xcframework", "catalyst: only"]),
-            ("none", "—", ["none upstream"]),
+            ("partial", "◐", ["WebRtcInterop", "ours, in progress"]),
             ("none", "—", ["none upstream"]),
             ("host", "●", ["the browser", "Chromium //media"]),
         ],
@@ -85,6 +85,7 @@ LEGEND = [
     ("core", "Core — same source everywhere"),
     ("yes", "Present in the artifact we build"),
     ("host", "Supplied by the browser, not by us"),
+    ("partial", "Being built here, incomplete"),
     ("none", "Not used on this platform"),
 ]
 
@@ -95,7 +96,7 @@ COL_W = 168
 GAP = 8
 ROW_H = 86
 HEAD_H = 46
-LEGEND_WRAP = 2          # captions before the legend wraps to a second row
+LEGEND_WRAP = 3          # captions before the legend wraps to a second row
 LEGEND_H = 84
 WIDTH = PAD * 2 + LABEL_W + GAP + len(PLATFORMS) * (COL_W + GAP) - GAP
 HEIGHT = PAD * 2 + HEAD_H + len(TIERS) * (ROW_H + GAP) - GAP + LEGEND_H

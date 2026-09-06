@@ -58,7 +58,7 @@ form:
 
 | Tier | Android | iOS | Mac Catalyst | Windows | Linux | Web |
 |---|---|---|---|---|---|---|
-| 3 Integration | yes | yes | yes | none upstream | none upstream | the browser |
+| 3 Integration | yes | yes | yes | *being built here* | none upstream | the browser |
 | 2 Native media I/O | — | — | — | yes | yes | screen capture only |
 | 1 Core engine | yes | yes | yes | yes | yes | yes |
 
@@ -86,7 +86,7 @@ Native columns describe the artifacts this repository produces today, not WebRTC
 | **H.264** | hardware | hardware | hardware | **none** | **none** | yes |
 | Hardware video encode / decode | MediaCodec | VideoToolbox | VideoToolbox | **none** | **none** | GPU process |
 | Video renderer | EGL | Metal | Metal | **none** | **none** | `<video>` |
-| High-level API bindings | Java | Obj-C | Obj-C | C++ only | C++ only | JavaScript |
+| High-level API bindings | Java | Obj-C | Obj-C | *WebRtcInterop* | C++ only | JavaScript |
 
 "none" means the capability does not exist for that platform upstream. Screen capture is absent on
 the Apple and Android columns because `rtc_desktop_capture_supported` excludes them by definition —
@@ -163,8 +163,10 @@ Every other column reaches tier 3 somehow — Android and the Apple platforms th
 through the browser. Windows and Linux have no `sdk/` target upstream and no host to supply one, so
 they stop at the core plus native media I/O.
 
-That is what a Windows SDK for WebRTCme would be building: the missing tier 3. [Interop ABI](Interop-ABI)
-is the contract for it.
+That is what `WebRtcInterop.dll` is: the missing tier 3, built here rather than by Google.
+[Interop ABI](Interop-ABI) is its contract, and it is partially implemented — Windows is the one
+column in the figure whose tier 3 is our own work in progress rather than someone else's finished
+product. Linux keeps the gap until the same shim is built for it.
 
 ### Screen capture runs the other way
 

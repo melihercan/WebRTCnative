@@ -7,7 +7,8 @@ each artifact to the project that consumes it.
 
 | Artifact | WebRTCme project | Role |
 |---|---|---|
-| `webrtc.dll` | `WebRTCme.Bindings/WebRTCme.Bindings.Native` | Windows P/Invoke target |
+| `webrtc.dll` | *(none — see below)* | for linking native C/C++ against WebRTC |
+| `WebRtcInterop.dll` + companions | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.Windows` | the Windows P/Invoke target |
 | `libwebrtc.so` | `WebRTCme.Bindings/WebRTCme.Bindings.Native` | Linux P/Invoke target |
 | `libwebrtc.dylib` | *(none — see below)* | built for completeness, not consumed |
 | `libwebrtc.aar` | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.Android` | Java binding source |
@@ -33,11 +34,38 @@ The static libraries are not used by WebRTCme. They exist for anyone building a 
 that links WebRTC directly, and because the static build is the sanity check that the source tree
 compiles at all before the shared-library patch enters the picture.
 
+## Windows: two DLLs, deliberately
+
+Windows produces two artifacts that both contain WebRTC, and this is a choice rather than an
+oversight.
+
+`WebRtcInterop.dll` is the one WebRTCme uses — the [interop shim](Interop-ABI), and the Windows
+equivalent of `libwebrtc.aar` or `WebRTC.xcframework`. It does **not** depend on `webrtc.dll`; it
+absorbs the WebRTC code it needs, so the runtime set is:
+
+```
+WebRtcInterop.dll                                  ~17.7 MB
+third_party_abseil-cpp_absl.dll
+third_party_boringssl.dll
+third_party_protobuf_protobuf_full_and_lite_library.dll
+libc++.dll
+```
+
+All five must sit beside the application; the collect step gathers them together.
+
+`webrtc.dll` from `WebRtcNativeWindowsDynamicLib` therefore has no consumer in WebRTCme. It is kept
+because it is what someone linking WebRTC from native C or C++ would want, and because it is the
+cheaper thing to build when only checking that the tree still compiles. The duplicated ~18 MB is
+accepted knowingly.
+
+Two alternatives were considered and rejected for now: making the shim link against `webrtc.dll`
+so it shrinks to a thin wrapper, and retiring the dynamic workflow altogether. Either remains open.
+
 ## Desktop: P/Invoke
 
 `WebRTCme.Bindings.Native` calls into the shared libraries. The .NET default probing rules apply,
-so the file names matter: `webrtc.dll` on Windows, `libwebrtc.so` on Linux, `libwebrtc.dylib` on
-macOS. The workflows already emit exactly those names.
+so the file names matter: `libwebrtc.so` on Linux. The workflows already emit exactly those
+names.
 
 Match the architecture to the app. `target_cpu=x64` for a `win-x64` app. A mismatch surfaces as
 `DllNotFoundException` or `BadImageFormatException` at the first call.
