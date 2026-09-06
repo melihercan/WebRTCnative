@@ -18,7 +18,18 @@ stated, against the compiled Windows output — not from documentation.
 | 2 | Native media I/O — microphone, camera, screen capture | `modules/` |
 | 1 | Core engine — transport, RTP, bandwidth estimation, software codecs, APM | `api/`, `pc/`, `call/`, `media/` |
 
-Which stack each platform actually receives:
+Which layers each platform actually receives:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="platform-layers-dark.svg">
+  <img alt="Matrix of the three WebRTC layers against Android, iOS, macOS, Windows, Linux and the Web, showing which layers each platform receives" src="platform-layers-light.svg">
+</picture>
+
+Regenerate with `python tools/make_platform_diagram.py` in the main repository after changing the
+data; the two SVGs are build output, not hand-edited.
+
+The same thing grouped by the four distinct stack shapes, for anyone who prefers a source form they
+can edit in place:
 
 ```mermaid
 flowchart TB
