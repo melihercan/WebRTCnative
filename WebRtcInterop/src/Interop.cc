@@ -17,7 +17,7 @@
  *      counting never crosses the boundary; _release destroys the struct.
  */
 
-#include "Interop.h"
+#include "Internal.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -41,44 +41,15 @@
 #include "api/video_codecs/builtin_video_encoder_factory.h"
 #include "modules/video_capture/video_capture.h"
 #include "modules/video_capture/video_capture_factory.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/thread.h"
 
-/* -------------------------------------------------------------------------
- *  Handles
- *
- *  Defining the structs the header forward-declares. The smart pointer lives
- *  here, on the heap, for exactly as long as the caller holds the handle.
- * ---------------------------------------------------------------------- */
-
-struct rtc_factory {
-  webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> ptr;
-};
-
-struct rtc_media_track {
-  webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track;
-  /* Audio tracks do not own their source, so hold a reference here to keep it
-   * alive for as long as the caller holds the track. Video tracks do own
-   * theirs, and this stays null. */
-  webrtc::scoped_refptr<webrtc::AudioSourceInterface> audio_source;
-};
-
-namespace {
-
-/* The three threads WebRTC needs. Owned by the library, created by
- * rtc_initialize and destroyed by rtc_terminate. Callbacks reach the caller
- * on the signalling thread — see the ABI page. */
-struct Runtime {
-  std::unique_ptr<webrtc::Thread> network_thread;
-  std::unique_ptr<webrtc::Thread> worker_thread;
-  std::unique_ptr<webrtc::Thread> signaling_thread;
-};
+namespace webrtc_interop {
 
 std::mutex g_mutex;
 std::unique_ptr<Runtime> g_runtime;
 
-/* Copies into memory the caller frees with rtc_string_free. Returns null only
- * on allocation failure, which callers report as RTC_ERR_INTERNAL. */
 char* DuplicateString(const char* value) {
   const size_t length = std::strlen(value);
   char* copy = static_cast<char*>(std::malloc(length + 1));
@@ -88,6 +59,8 @@ char* DuplicateString(const char* value) {
   std::memcpy(copy, value, length + 1);
   return copy;
 }
+
+namespace {
 
 /* -------------------------------------------------------------------------
  *  Camera source
@@ -161,6 +134,12 @@ class CameraSource : public webrtc::AdaptedVideoTrackSource,
 };
 
 }  // namespace
+}  // namespace webrtc_interop
+
+using webrtc_interop::DuplicateString;
+using webrtc_interop::g_mutex;
+using webrtc_interop::g_runtime;
+using webrtc_interop::Runtime;
 
 /* -------------------------------------------------------------------------
  *  Library
@@ -170,6 +149,14 @@ RTC_API rtc_status RTC_CALL rtc_initialize(void) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_runtime != nullptr) {
     return RTC_ERR_INVALID_STATE;
+  }
+
+  /* WEBRTC_INTEROP_VERBOSE turns on WebRTC's own logging. Kept because the
+   * ICE layer is otherwise silent, and the one bug that cost real time here
+   * was only visible in it. */
+  if (std::getenv("WEBRTC_INTEROP_VERBOSE") != nullptr) {
+    webrtc::LogMessage::LogToDebug(webrtc::LS_INFO);
+    webrtc::LogMessage::SetLogToStderr(true);
   }
 
   if (!webrtc::InitializeSSL()) {
@@ -424,8 +411,8 @@ RTC_API rtc_status RTC_CALL rtc_video_track_create(rtc_factory* factory,
   }
   *out_track = nullptr;
 
-  webrtc::scoped_refptr<CameraSource> source =
-      CameraSource::Create(device_id, width, height, fps);
+  webrtc::scoped_refptr<webrtc_interop::CameraSource> source =
+      webrtc_interop::CameraSource::Create(device_id, width, height, fps);
   if (source == nullptr) {
     return RTC_ERR_NOT_FOUND;
   }

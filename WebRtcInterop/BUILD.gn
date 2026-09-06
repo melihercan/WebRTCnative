@@ -50,7 +50,9 @@ rtc_shared_library("WebRtcInterop") {
 
   sources = [
     "include/Interop.h",
+    "src/Internal.h",
     "src/Interop.cc",
+    "src/PeerConnection.cc",
   ]
 
   # video_capture_internal_impl is the one that carries the platform backends
@@ -64,6 +66,7 @@ rtc_shared_library("WebRtcInterop") {
     "../api/video_codecs:builtin_video_decoder_factory",
     "../api/video_codecs:builtin_video_encoder_factory",
     "../api:media_stream_interface",
+    "../api:rtc_error",
     "../api/video:adapted_video_track_source",
     "../api/video:video_frame",
     "../media:rtc_audio_video",
@@ -72,4 +75,8 @@ rtc_shared_library("WebRtcInterop") {
     "../rtc_base:ssl_adapter",
     "../rtc_base:threading",
   ]
+
+  if (is_win) {
+    deps += [ "../rtc_base:win32_socket_init" ]
+  }
 }

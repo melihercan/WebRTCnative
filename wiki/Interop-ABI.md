@@ -145,6 +145,16 @@ static void OnIceCandidate(IntPtr ctx, IntPtr mid, int mline, IntPtr sdp)
 }
 ```
 
+### Winsock, on Windows
+
+`rtc_initialize` holds a `WinsockInitializer` for the library's lifetime. Without it every UDP
+socket fails with `WSANOTINITIALISED`, and the failure is quiet in a way that wastes an afternoon:
+ICE still gathers TCP placeholder candidates, `addIceCandidate` still returns success, the
+connection still reaches `checking` — and then never leaves it.
+
+Set `WEBRTC_INTEROP_VERBOSE` to route WebRTC's own logging to stderr. The ICE layer is silent
+otherwise, and that variable is how this was found.
+
 ### Threading — read this before writing a handler
 
 **Callbacks arrive on WebRTC's signalling thread, not yours.** That thread must not be blocked;
@@ -278,7 +288,7 @@ Video capture has no ready-made source upstream: `modules/video_capture` produce
 `CameraSource` bridging the two through `AdaptedVideoTrackSource`. The camera opens when the track
 is created and closes when the last reference to it goes away.
 
-### Peer connection
+### Peer connection — **implemented**
 
 ```c
 typedef struct {
@@ -304,7 +314,7 @@ void       rtc_peer_connection_release(rtc_peer_connection* pc);
 `close` is separate from `release`: W3C `close()` is an observable state transition, and the handle
 must stay valid for callbacks still in flight.
 
-### Negotiation
+### Negotiation — **implemented**
 
 ```c
 typedef void (*rtc_on_sdp_success_fn)(void* user_data, const char* type, const char* sdp);
