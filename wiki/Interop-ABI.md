@@ -36,7 +36,8 @@ UTF-8, and function pointers.
 ### Naming
 
 `rtc_<object>_<verb>`, lower snake case. Creation is `rtc_<object>_create`, disposal is
-`rtc_<object>_release`. Everything is `extern "C"` and exported with `RTC_EXPORT`.
+`rtc_<object>_release`. Everything is `extern "C"`, exported with `RTC_API` and declared `RTC_CALL` (`__cdecl` on
+Windows, so x86 works too).
 
 ### Handles
 
@@ -53,11 +54,15 @@ On the C# side these are `IntPtr` wrapped in a `SafeHandle` per type.
 
 ### Ownership — the single rule
 
-> **Every handle returned through an out-parameter is owned by the caller and must be passed to
-> exactly one matching `_release`.**
+> **Every handle you receive — through an out-parameter or through a callback — is yours, and must
+> be passed to exactly one matching `_release`.**
 
 Nothing else transfers ownership. No handle is freed as a side effect of another call, and
 `_release` on a handle you did not receive is undefined.
+
+The callback half of that rule exists for `on_track`, which delivers a `rtc_media_track*` the
+receiver must release. Handles are the one thing a callback hands over rather than lends; strings
+passed to a callback stay borrowed.
 
 This rule exists because the 2023 attempt died without one: `CreateBuiltinAudioEncoderFactory`
 returned the address of a stack `scoped_refptr`, and `CallCreatePeerConnectionFactory` was
@@ -161,10 +166,29 @@ typedef struct {
 Null members are permitted and simply not raised. The struct is copied at registration; the caller
 need not keep it alive.
 
+## Verified layout
+
+Every struct is blittable on x64 — no `[MarshalAs]`, no custom marshaller, no packing attribute.
+Confirmed by compiling the header with the same `clang-cl` that builds `webrtc.dll`
+(clang 23, `x86_64-pc-windows-msvc`):
+
+| Type | Size | Field offsets |
+|---|---|---|
+| `rtc_status` | 4 | — |
+| `rtc_peer_connection_state` | 4 | — |
+| `rtc_ice_server` | 24 | `urls` 0, `username` 8, `password` 16 |
+| `rtc_configuration` | 16 | `ice_servers` 0, `ice_server_count` 8 |
+| `rtc_video_frame` | 56 | `y` 0, `width` 36, `timestamp_us` 48 |
+| `rtc_peer_connection_observer` | 40 | five function pointers |
+
+The header also compiles clean as C11 and as C++17 under `/W4`, so it can be consumed by a C
+caller, a C++ caller, or read as documentation without a toolchain.
+
 ## Slice one
 
-The smallest surface that carries an audio and video call between two Windows peers. Twenty-three
-functions. Everything else waits until this works end to end.
+The smallest surface that carries an audio and video call between two Windows peers. Twenty-five
+functions, declared in `WebRtcInterop/include/Interop.h`. Everything else waits until this works
+end to end.
 
 ### Library
 
@@ -324,6 +348,9 @@ single offer/answer. Each is additive and none changes the conventions above.
   built around.
 - **The shim is platform-neutral C++.** Linux needs a new workflow, not new interop code, and
   `Bindings.Maui.Windows` becomes the template for the Linux binding.
+- **`include/Interop.h` is written to this contract**; `src/Interop.cc` is not — it predates it.
+  Treat the 2023 implementation as a build harness that works, and this header as what to implement
+  behind it.
 - **Verify the ownership rule with a leak test before growing the surface.** Create and release a
   thousand peer connections and watch the process working set. Getting this wrong is cheap to fix
   at twenty functions and expensive at two hundred.
