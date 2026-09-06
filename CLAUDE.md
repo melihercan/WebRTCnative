@@ -187,12 +187,17 @@ Three consequences that will otherwise be rediscovered by debugging a null facto
   which is false, so OpenH264 is never compiled (verified: 0 objects). The DLL still exports 26
   H.264 symbols for SDP/RTP, but `h264.cc:174` is `return nullptr`. Browsers get H.264 from the
   same tree via `media_use_openh264` — one flag apart.
-- **The macOS dylib has no camera capture, and nothing consumes it.** `modules/video_capture/`
-  has `linux/` and `windows/` only. WebRTCme targets `net10.0-maccatalyst`, and Mac Catalyst is
-  served by the *iOS* xcframework (hence the `catalyst:` slices in that workflow's arch list), so
-  `libwebrtc.dylib` has no consumer. The macOS workflows are kept deliberately as a check that the
-  tree still builds on Apple silicon — do not "fix" this by switching them to
-  `sdk:mac_framework_objc` unless a native AppKit target appears.
+- **Mac Catalyst rides the iOS xcframework — it is not a separate build.** WebRTCme targets
+  `net10.0-ios` and `net10.0-maccatalyst`, both served by one artifact, which is why the iOS
+  workflow's arch list carries `catalyst:arm64` and `catalyst:x64`. Catalyst therefore has the full
+  integration layer: VideoToolbox H.264, AVFoundation capture, Metal rendering.
+- **The macOS dylib is built but unconsumed.** `modules/video_capture/` has `linux/` and
+  `windows/` only, so it has no camera path — which costs nothing, because nothing uses it. Those
+  workflows are kept deliberately as an Apple-silicon build check; do not "fix" them by switching
+  to `sdk:mac_framework_objc` unless a native AppKit target appears.
+- **Windows and Linux are the only platforms with no tier 3 at all**, and no upstream `sdk/`
+  target to build. A Windows SDK for WebRTCme means writing or adopting a C ABI shim over
+  `webrtc.dll`; see `wiki/Prebuilt-distributions.md`.
 - **Screen capture is desktop-only.** `rtc_desktop_capture_supported` excludes mobile by
   definition.
 

@@ -39,10 +39,13 @@ THEMES = {
     },
 }
 
+# Mac Catalyst rather than macOS: Catalyst is what WebRTCme ships
+# (net10.0-maccatalyst) and it rides the iOS xcframework. The macOS dylib is
+# still built but nothing consumes it, so it does not earn a column here.
 PLATFORMS = [
     ("Android", "WebRTCnative"),
     ("iOS", "WebRTCnative"),
-    ("macOS", "WebRTCnative"),
+    ("Mac Catalyst", "via iOS framework"),
     ("Windows", "WebRTCnative"),
     ("Linux", "WebRTCnative"),
     ("Web", "browser vendor"),
@@ -55,7 +58,7 @@ TIERS = [
         [
             ("yes", "●", ["sdk/android", "Java + JNI"]),
             ("yes", "●", ["framework_objc", "Objective-C"]),
-            ("partial", "◐", ["mac_framework_objc", "exists, not built"]),
+            ("yes", "●", ["WebRTC.xcframework", "catalyst: slices"]),
             ("none", "—", ["none upstream"]),
             ("none", "—", ["none upstream"]),
             ("host", "●", ["the browser", "Chromium //media"]),
@@ -66,7 +69,7 @@ TIERS = [
         [
             ("none", "—", ["handled in tier 3"]),
             ("none", "—", ["handled in tier 3"]),
-            ("partial", "◐", ["audio + screen", "no camera"]),
+            ("none", "—", ["handled in tier 3"]),
             ("yes", "●", ["WASAPI · DirectShow", "screen"]),
             ("yes", "●", ["ALSA/Pulse · V4L2", "screen"]),
             ("host_partial", "◐", ["screen capture only", "rest from host"]),
@@ -82,8 +85,7 @@ LEGEND = [
     ("core", "Core — same source everywhere"),
     ("yes", "Present in the artifact we build"),
     ("host", "Supplied by the browser, not by us"),
-    ("partial", "Exists upstream, not in our build"),
-    ("none", "Does not exist for this platform"),
+    ("none", "Not used on this platform"),
 ]
 
 # geometry
@@ -93,7 +95,7 @@ COL_W = 168
 GAP = 8
 ROW_H = 86
 HEAD_H = 46
-LEGEND_WRAP = 3          # captions before the legend wraps to a second row
+LEGEND_WRAP = 2          # captions before the legend wraps to a second row
 LEGEND_H = 84
 WIDTH = PAD * 2 + LABEL_W + GAP + len(PLATFORMS) * (COL_W + GAP) - GAP
 HEIGHT = PAD * 2 + HEAD_H + len(TIERS) * (ROW_H + GAP) - GAP + LEGEND_H

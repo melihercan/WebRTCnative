@@ -22,7 +22,7 @@ Which layers each platform actually receives:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="platform-layers-dark.svg">
-  <img alt="Matrix of the three WebRTC layers against Android, iOS, macOS, Windows, Linux and the Web, showing which layers each platform receives" src="platform-layers-light.svg">
+  <img alt="Matrix of the three WebRTC layers against Android, iOS, Mac Catalyst, Windows, Linux and the Web, showing which layers each platform receives" src="platform-layers-light.svg">
 </picture>
 
 Regenerate with `python tools/make_platform_diagram.py` in the main repository after changing the
@@ -33,7 +33,7 @@ can edit in place:
 
 ```mermaid
 flowchart TB
-    subgraph MOBILE["📱 Android · iOS"]
+    subgraph MOBILE["📱 Android · iOS · Mac Catalyst"]
         direction TB
         M3["<b>Tier 3</b> — sdk/android, framework_objc<br/>hardware codecs · camera · renderer · bindings"]
         M1["<b>Tier 1</b> — core engine"]
@@ -45,12 +45,6 @@ flowchart TB
         D1["<b>Tier 1</b> — core engine"]
         D2 --- D1
     end
-    subgraph MAC["🍎 macOS dylib — built, not consumed"]
-        direction TB
-        C2["<b>Tier 2</b> — modules/<br/>audio · screen capture · <b>no camera</b>"]
-        C1["<b>Tier 1</b> — core engine"]
-        C2 --- C1
-    end
     subgraph WEB["🌐 Web"]
         direction TB
         W3["<b>Tier 3</b> — the browser<br/>Chromium //media · WebKit · Gecko"]
@@ -59,40 +53,44 @@ flowchart TB
     end
 ```
 
-Mobile and the Web sit on tier 3; Windows and Linux sit on tier 2. The macOS dylib sits on an
-incomplete tier 2, but nothing consumes it — Mac Catalyst runs on the iOS xcframework. In table
+The Apple platforms, Android and the Web sit on tier 3; Windows and Linux sit on tier 2. In table
 form:
 
-| Tier | Android | iOS | macOS | Windows | Linux | Web |
+| Tier | Android | iOS | Mac Catalyst | Windows | Linux | Web |
 |---|---|---|---|---|---|---|
-| 3 Integration | yes | yes | *exists, not built* | none upstream | none upstream | the browser |
-| 2 Native media I/O | — | — | partial | yes | yes | screen capture only |
+| 3 Integration | yes | yes | yes | none upstream | none upstream | the browser |
+| 2 Native media I/O | — | — | — | yes | yes | screen capture only |
 | 1 Core engine | yes | yes | yes | yes | yes | yes |
 
-Tier 2 being blank on mobile is not a gap. Mobile does the same job in tier 3:
+Tier 2 being blank on the Apple and Android columns is not a gap. They do the same job in tier 3:
 `modules/audio_device/` contains `win/`, `mac/` and `linux/` and no mobile directories, because
 iOS pulls `sdk:audio_device` instead. Same responsibility, different layer.
+
+Mac Catalyst is not a separate build. It is an iOS app running on a Mac, so it rides the iOS
+`WebRTC.xcframework` — which is why that workflow's default arch list includes `catalyst:arm64`
+and `catalyst:x64`. Everything true of iOS below is true of Catalyst.
 
 ## Capability by platform
 
 Native columns describe the artifacts this repository produces today, not WebRTC's full potential.
 
-| Capability | Android | iOS | macOS | Windows | Linux | Web |
+| Capability | Android | iOS | Mac Catalyst | Windows | Linux | Web |
 |---|---|---|---|---|---|---|
 | Transport, RTP, bandwidth estimation | yes | yes | yes | yes | yes | yes |
 | VP8 · VP9 · AV1 · Opus | yes | yes | yes | yes | yes | yes |
 | Software AEC · NS · AGC | yes | yes | yes | yes | yes | yes |
-| Microphone / speaker | SDK | SDK | core | core | core | browser |
-| Camera capture | SDK | SDK | **not built** | core | core | browser |
-| Screen & window capture | none | none | core | core | core | browser |
-| Hardware echo cancellation | yes | yes | none | none | none | browser |
-| **H.264** | hardware | hardware | **not built** | **none** | **none** | yes |
-| Hardware video encode / decode | MediaCodec | VideoToolbox | **not built** | **none** | **none** | GPU process |
-| Video renderer | EGL | Metal | **not built** | **none** | **none** | `<video>` |
-| High-level API bindings | Java | Obj-C | **not built** | C++ only | C++ only | JavaScript |
+| Microphone / speaker | SDK | SDK | SDK | core | core | browser |
+| Camera capture | SDK | SDK | SDK | core | core | browser |
+| Screen & window capture | none | none | none | core | core | browser |
+| Hardware echo cancellation | yes | yes | yes | none | none | browser |
+| **H.264** | hardware | hardware | hardware | **none** | **none** | yes |
+| Hardware video encode / decode | MediaCodec | VideoToolbox | VideoToolbox | **none** | **none** | GPU process |
+| Video renderer | EGL | Metal | Metal | **none** | **none** | `<video>` |
+| High-level API bindings | Java | Obj-C | Obj-C | C++ only | C++ only | JavaScript |
 
-"not built" means WebRTC provides it and this repository does not build it. "none" means it does
-not exist for that platform upstream.
+"none" means the capability does not exist for that platform upstream. Screen capture is absent on
+the Apple and Android columns because `rtc_desktop_capture_supported` excludes them by definition —
+Mac Catalyst counts as iOS there, not as a Mac.
 
 ## Who builds each platform
 
@@ -100,13 +98,17 @@ not exist for that platform upstream.
 |---|---|---|---|
 | Android | this repository | `libwebrtc.aar` | Java bindings |
 | iOS | this repository | `WebRTC.xcframework` | Objective-C bindings |
-| macOS | this repository | `libwebrtc.dylib` | *not consumed* |
+| Mac Catalyst | this repository | the same `WebRTC.xcframework` | Objective-C bindings |
 | Windows | this repository | `webrtc.dll` | P/Invoke |
 | Linux | this repository | `libwebrtc.so` | P/Invoke |
 | Web | Google · Mozilla · Apple | the browser binary | JSInterop over `RTCPeerConnection` |
 
-Mac Catalyst does not appear as a row because it is not a separate build: it is served by the iOS
-`WebRTC.xcframework`, whose default arch list includes `catalyst:arm64` and `catalyst:x64`.
+Mac Catalyst shares iOS's row artifact rather than having its own: one xcframework carries both,
+which is why the iOS workflow's default arch list includes `catalyst:arm64` and `catalyst:x64`.
+
+A `libwebrtc.dylib` for native macOS is also built, but nothing consumes it — WebRTCme targets
+`net10.0-maccatalyst`, not `net10.0-macos`. Those workflows are kept as a check that the tree still
+builds on Apple silicon.
 
 Chrome and Edge compile this tree as part of Chromium. Firefox maintains its own embedding —
 `build_with_mozilla` guards appear in 9 build files. Safari uses WebKit's fork. There is no wasm or
@@ -153,19 +155,14 @@ endpoints, or with SFUs on their H.264 path. Blazor users are unaffected — the
 Enabling it means setting `proprietary_codecs=true`, which carries MPEG-LA licensing implications
 for whoever distributes the result. That is a deliberate decision, not a build tweak.
 
-### The macOS dylib has no camera — and that is fine
+### Windows and Linux are the only platforms without an integration layer
 
-`modules/video_capture/` contains only `linux/` and `windows/`. There is no `mac/`, so the macOS
-`.dylib` this repository builds has no camera capture path at all. WebRTC does ship
-`sdk:mac_framework_objc` with AVFoundation capture, Metal rendering (`RTCMTLNSVideoView`) and
-VideoToolbox H.264 — we simply build the raw C++ target instead.
+Every other column reaches tier 3 somehow — Android and the Apple platforms through `sdk/`, the Web
+through the browser. Windows and Linux have no `sdk/` target upstream and no host to supply one, so
+they stop at the core plus native media I/O.
 
-**This is not a gap worth closing.** WebRTCme targets `net10.0-maccatalyst`, not `net10.0-macos`,
-and Mac Catalyst is served by the *iOS* xcframework — which is why the iOS workflow's default arch
-list includes `catalyst:arm64` and `catalyst:x64`. Nothing consumes `libwebrtc.dylib`.
-
-The macOS workflows are kept for completeness and as a check that the tree still builds on Apple
-silicon. Treat their artifacts as unconsumed unless someone adopts a native AppKit target.
+That is what a Windows SDK for WebRTCme would be building: the missing tier 3. See
+[Prebuilt distributions](Prebuilt-distributions) for the C ABI wrappers that solve the same problem.
 
 ### Screen capture runs the other way
 

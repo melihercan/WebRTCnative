@@ -11,16 +11,19 @@ each artifact to the project that consumes it.
 | `libwebrtc.so` | `WebRTCme.Bindings/WebRTCme.Bindings.Native` | Linux P/Invoke target |
 | `libwebrtc.dylib` | *(none — see below)* | built for completeness, not consumed |
 | `libwebrtc.aar` | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.Android` | Java binding source |
-| `WebRTC.xcframework` | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.iOS` | ObjC binding source |
+| `WebRTC.xcframework` | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.iOS` | ObjC binding source — **iOS and Mac Catalyst** |
 | `webrtc.lib`, `libwebrtc.a` | *(none)* | for linking native C/C++ against WebRTC |
 
 [Platform layers](Platform-layers) records what each of these artifacts actually contains — the
 desktop ones are missing H.264 entirely. Read it before assuming a capability is present.
 
-**macOS is built but not consumed.** WebRTCme targets `net10.0-maccatalyst`, and Mac Catalyst is
-served by the iOS `WebRTC.xcframework`, whose default arch list includes the `catalyst:` slices.
-`libwebrtc.dylib` has no camera capture path and no consumer; the workflows are kept as a check
-that the tree still builds on Apple silicon.
+**One xcframework covers iOS and Mac Catalyst.** WebRTCme targets `net10.0-ios` and
+`net10.0-maccatalyst`, and both are served by the same artifact — the iOS workflow's default arch
+list carries `catalyst:arm64` and `catalyst:x64` for exactly that reason. There is no separate
+Catalyst build to run.
+
+`libwebrtc.dylib` for native macOS is built but has no consumer; those workflows are kept as a
+check that the tree still builds on Apple silicon.
 
 The static libraries are not used by WebRTCme. They exist for anyone building a native component
 that links WebRTC directly, and because the static build is the sanity check that the source tree
