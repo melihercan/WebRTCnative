@@ -1,121 +1,71 @@
+# WebRtcInterop — the flat C surface over WebRTC that .NET P/Invokes.
+#
+# This file only resolves from INSIDE a WebRTC checkout: it imports
+# ../webrtc.gni and depends on sibling targets such as ../api and ../pc. The
+# WebRtcNativeInteropWindows workflow copies this directory to
+# src/WebRtcInterop and appends "//WebRtcInterop" to the root group("default")
+# so ninja reaches it.
+#
+# Building it standalone is not supported and never will be — see the
+# "Interop ABI" wiki page for why the shim has to be compiled by WebRTC's own
+# clang toolchain rather than by MSVC.
+
 import("../webrtc.gni")
 
-declare_args() {
-  libwebrtc_intel_media_sdk = false
-  libwebrtc_desktop_capture = true
-}
-
-if (is_android) {
-  import("//build/config/android/config.gni")
-  import("//build/config/android/rules.gni")
-} else if (is_mac) {
-  import("//build/config/mac/rules.gni")
-} else if (is_ios) {
-  import("//build/config/ios/rules.gni")
-}
-
-config("external_config") {
+# Consumers of the header link against the DLL rather than build it.
+config("interop_public_config") {
   include_dirs = [ "include" ]
-  if (is_win) {
-    defines = [ "LIB_WEBRTC_API_DLL" ]
-  }
 }
 
 rtc_shared_library("WebRtcInterop") {
-  libs = []
-  include_dirs = [
-    ".",
-    "include",
-  ]
+  include_dirs = [ "include" ]
 
-  defines = [
-    "USE_LIBYUV",
-    "WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE",
-  ]
+  # Switches RTC_API in Interop.h from dllimport to dllexport.
+  defines = [ "RTC_INTEROP_IMPLEMENTATION" ]
+
+  # WEBRTC_LIBRARY_IMPL is load-bearing, not boilerplate. WebRTC's headers
+  # declare their symbols RTC_EXPORT, which rtc_base/system/rtc_export.h
+  # expands to __declspec(dllimport) unless this is defined. This target links
+  # those objects directly, so without it every call is an import of a locally
+  # defined symbol and lld-link fails with LNK4217.
+  defines += [ "WEBRTC_LIBRARY_IMPL" ]
 
   if (is_win) {
-    defines += [
-      "LIB_WEBRTC_API_EXPORTS",
-      "WEBRTC_WIN",
-      "WEBRTC_LIBRARY_IMPL",
-    ]
+    defines += [ "WEBRTC_WIN" ]
   }
-
   if (is_linux) {
     defines += [
       "WEBRTC_LINUX",
       "WEBRTC_POSIX",
     ]
   }
+  if (is_mac) {
+    defines += [
+      "WEBRTC_MAC",
+      "WEBRTC_POSIX",
+    ]
+  }
 
-  public_configs = [ ":external_config" ]
+  public_configs = [ ":interop_public_config" ]
 
   sources = [
     "include/Interop.h",
     "src/Interop.cc",
   ]
 
-  # intel media sdk
-  if (is_win && libwebrtc_intel_media_sdk) {
-    sources += [
-    ]
-    include_dirs += [ ]
-    defines += [ "USE_INTEL_MEDIA_SDK" ]
-    configs += [  ]
-    libs += [
-    ]
-    lib_dirs = [  ]
-    ldflags = [
-      "/ignore:4098",
-      "/ignore:4099",
-    ]
-  }
-
-  if (is_win && is_clang) {
-    cflags = [
-      "-Wno-microsoft-extra-qualification",
-      "-Wno-reorder",
-    ]
-  }
-  if (is_clang) {
-    # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
-    #suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
-  }
-
-##    "../api/crypto:frame_crypto_transformer",
-
+  # Slice one needs the factory, the peer connection API, the builtin codec
+  # factories and the threading primitives. Media capture, desktop capture and
+  # libyuv arrive with later slices; adding a dependency before the code that
+  # needs it only lengthens the link.
   deps = [
     "../api:create_peerconnection_factory",
-    "../api:libjingle_peerconnection_api",
+    "../api:peer_connection_interface",
     "../api/audio_codecs:builtin_audio_decoder_factory",
     "../api/audio_codecs:builtin_audio_encoder_factory",
-    "../api/video:video_frame",
     "../api/video_codecs:builtin_video_decoder_factory",
     "../api/video_codecs:builtin_video_encoder_factory",
     "../media:rtc_audio_video",
-    "../media:rtc_internal_video_codecs",
-    "../media:rtc_media",
-    "../media:rtc_media_base",
-    "../modules/audio_device:audio_device",
-    "../modules/audio_processing:api",
-    "../modules/audio_processing:audio_processing",
-    "../modules/video_capture:video_capture_module",
-    "../pc:libjingle_peerconnection",
-    "../rtc_base:rtc_base",
-    "../sdk:media_constraints",
-    "//third_party/abseil-cpp/absl/memory",
-    "//third_party/boringssl:boringssl",
-    "//third_party/libyuv",
+    "../rtc_base:ssl_adapter",
+    "../rtc_base:threading",
   ]
-
-  # screen capture device
-  if (libwebrtc_desktop_capture) {
-    defines += [ "RTC_DESKTOP_DEVICE" ]
-    sources += [
-    ]
-    deps += [
-      "../modules/desktop_capture",
-      "//third_party/libjpeg_turbo:libjpeg",
-    ]
-  }
 }
