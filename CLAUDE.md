@@ -187,9 +187,12 @@ Three consequences that will otherwise be rediscovered by debugging a null facto
   which is false, so OpenH264 is never compiled (verified: 0 objects). The DLL still exports 26
   H.264 symbols for SDP/RTP, but `h264.cc:174` is `return nullptr`. Browsers get H.264 from the
   same tree via `media_use_openh264` — one flag apart.
-- **macOS has no camera capture.** `modules/video_capture/` has `linux/` and `windows/` only.
-  Upstream's `sdk:mac_framework_objc` would supply it, plus Metal rendering and VideoToolbox
-  H.264; we build the `webrtc` target instead. This is the one gap that is ours, not upstream's.
+- **The macOS dylib has no camera capture, and nothing consumes it.** `modules/video_capture/`
+  has `linux/` and `windows/` only. WebRTCme targets `net10.0-maccatalyst`, and Mac Catalyst is
+  served by the *iOS* xcframework (hence the `catalyst:` slices in that workflow's arch list), so
+  `libwebrtc.dylib` has no consumer. The macOS workflows are kept deliberately as a check that the
+  tree still builds on Apple silicon — do not "fix" this by switching them to
+  `sdk:mac_framework_objc` unless a native AppKit target appears.
 - **Screen capture is desktop-only.** `rtc_desktop_capture_supported` excludes mobile by
   definition.
 

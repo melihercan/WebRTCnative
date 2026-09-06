@@ -9,8 +9,8 @@ WebRTC costs about an hour of runner time, so it happens when asked and not othe
 | `WebRtcNativeWindowsDynamicLib` | `windows-latest` | `webrtc.dll` (+ import lib, PDB) | `WebRTCme.Bindings.Native` |
 | `WebRtcNativeLinuxStaticLib` | `ubuntu-latest` | `libwebrtc.a` | native C/C++ linking |
 | `WebRtcNativeLinuxSharedLib` | `ubuntu-latest` | `libwebrtc.so` | `WebRTCme.Bindings.Native` |
-| `WebRtcNativeMacOsStaticLib` | `macos-latest` | `libwebrtc.a` | native C/C++ linking |
-| `WebRtcNativeMacOsSharedLib` | `macos-latest` | `libwebrtc.dylib` | `WebRTCme.Bindings.Native` |
+| `WebRtcNativeMacOsStaticLib` | `macos-latest` | `libwebrtc.a` | *not consumed* |
+| `WebRtcNativeMacOsSharedLib` | `macos-latest` | `libwebrtc.dylib` | *not consumed* |
 | `WebRtcNativeAndroidLib` | `ubuntu-latest` | `libwebrtc.aar` | `WebRTCme.Bindings.Maui.Android` |
 | `WebRtcNativeIosLib` | `macos-latest` | `WebRTC.xcframework` | `WebRTCme.Bindings.Maui.iOS` |
 
@@ -57,8 +57,10 @@ Everything lives on `C:`. The hosted runner's `D:` has roughly 14 GB free, nowhe
 
 `DEPOT_TOOLS_WIN_TOOLCHAIN: 0` builds with the Visual Studio installed on the runner instead of
 Google's internal toolchain, which is not publicly accessible. The install path is discovered with
-`vswhere` and exported as `GYP_MSVS_OVERRIDE_PATH` / `vs2022_install`, rather than being hard-coded
-to an edition that may change with the runner image.
+`vswhere` and exported as `GYP_MSVS_OVERRIDE_PATH` plus `vs<year>_install`, rather than being
+hard-coded to an edition that may change with the runner image. The year is Chromium's name for the
+release, not the version number: the runners now ship Visual Studio 18, which `vs_toolchain.py`
+calls **2026** and looks up via `vs2026_install`.
 
 `depot_tools` is downloaded as a zip and extracted with `7z`, not cloned — a plain clone on Windows
 misses the bootstrap step.
@@ -76,6 +78,10 @@ runs `apt-get clean`. Disk usage is printed before and after.
 between a shell script and a Python script across branches, so the workflows probe for either.
 
 ## macOS specifics
+
+The macOS artifacts have no consumer today — WebRTCme targets Mac Catalyst, which is served by the
+iOS xcframework. These workflows are kept as a check that the tree still builds on Apple silicon;
+see [Platform layers](Platform-layers).
 
 `macos-latest` is Apple silicon, so `target_cpu` defaults to `arm64`; choose `x64` for Intel Macs.
 The collect step runs `lipo -info` so the log records what was actually produced.

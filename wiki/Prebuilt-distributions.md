@@ -36,8 +36,9 @@ Jetson and Raspberry Pi. Its documentation is largely in Japanese.
 | [livekit/webrtc-xcframework](https://github.com/livekit/webrtc-xcframework) | 33 | MIT | 2026-09-05 | XCFramework built from the webrtc-sdk fork |
 | [alexpiezo/WebRTC](https://github.com/alexpiezo/WebRTC) | 133 | see repo | **2021-11-09** | Widely linked, but unmaintained for years — listed so it is recognised as stale |
 
-`stasel/WebRTC` is the reference point if the [macOS gap](Platform-layers) is ever closed here: it
-distributes the ObjC framework, which is the thing our macOS `.dylib` is missing.
+`stasel/WebRTC` is the reference point should a native AppKit target ever be needed — it
+distributes the ObjC framework that our macOS `.dylib` lacks. WebRTCme does not need one today;
+see [Platform layers](Platform-layers).
 
 ## C API wrappers
 
@@ -85,8 +86,7 @@ different code with different maturity.
 
 Every gap described in [Platform layers](Platform-layers) is a property of *which GN target was
 built*, not of who built it. A raw C++ `webrtc` target from any of these projects has the same
-missing H.264 and the same absent macOS camera path, because those come from
-`proprietary_codecs` defaulting false and from `modules/video_capture/` having no `mac/`.
+missing H.264, because that comes from `proprietary_codecs` defaulting false.
 
 The exceptions are the projects that build the `sdk/` targets — the Apple distributions above, and
 the Android outputs of the cross-platform builders. Those carry the integration layer, which is

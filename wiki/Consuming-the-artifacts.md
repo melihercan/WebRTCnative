@@ -9,14 +9,18 @@ each artifact to the project that consumes it.
 |---|---|---|
 | `webrtc.dll` | `WebRTCme.Bindings/WebRTCme.Bindings.Native` | Windows P/Invoke target |
 | `libwebrtc.so` | `WebRTCme.Bindings/WebRTCme.Bindings.Native` | Linux P/Invoke target |
-| `libwebrtc.dylib` | `WebRTCme.Bindings/WebRTCme.Bindings.Native` | macOS P/Invoke target |
+| `libwebrtc.dylib` | *(none — see below)* | built for completeness, not consumed |
 | `libwebrtc.aar` | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.Android` | Java binding source |
 | `WebRTC.xcframework` | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.iOS` | ObjC binding source |
 | `webrtc.lib`, `libwebrtc.a` | *(none)* | for linking native C/C++ against WebRTC |
 
 [Platform layers](Platform-layers) records what each of these artifacts actually contains — the
-desktop ones are missing H.264 entirely, and the macOS one has no camera capture. Read it before
-assuming a capability is present.
+desktop ones are missing H.264 entirely. Read it before assuming a capability is present.
+
+**macOS is built but not consumed.** WebRTCme targets `net10.0-maccatalyst`, and Mac Catalyst is
+served by the iOS `WebRTC.xcframework`, whose default arch list includes the `catalyst:` slices.
+`libwebrtc.dylib` has no camera capture path and no consumer; the workflows are kept as a check
+that the tree still builds on Apple silicon.
 
 The static libraries are not used by WebRTCme. They exist for anyone building a native component
 that links WebRTC directly, and because the static build is the sanity check that the source tree
@@ -28,8 +32,12 @@ compiles at all before the shared-library patch enters the picture.
 so the file names matter: `webrtc.dll` on Windows, `libwebrtc.so` on Linux, `libwebrtc.dylib` on
 macOS. The workflows already emit exactly those names.
 
-Match the architecture to the app. `target_cpu=x64` for a `win-x64` app; `arm64` for Apple silicon.
-A mismatch surfaces as `DllNotFoundException` or `BadImageFormatException` at the first call.
+Match the architecture to the app. `target_cpu=x64` for a `win-x64` app. A mismatch surfaces as
+`DllNotFoundException` or `BadImageFormatException` at the first call.
+
+Note that WebRTC's C++ API cannot be P/Invoked directly — a C ABI shim is required between
+`webrtc.dll` and any .NET caller. See [Prebuilt distributions](Prebuilt-distributions) for the
+options.
 
 `webrtc.dll.lib` from the Windows dynamic workflow is only needed to link from C/C++. P/Invoke does
 not use it. `webrtc.dll.pdb` is worth keeping alongside the DLL — it makes a native crash inside a

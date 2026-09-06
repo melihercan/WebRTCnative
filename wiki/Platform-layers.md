@@ -45,7 +45,7 @@ flowchart TB
         D1["<b>Tier 1</b> — core engine"]
         D2 --- D1
     end
-    subgraph MAC["🍎 macOS, as we build it"]
+    subgraph MAC["🍎 macOS dylib — built, not consumed"]
         direction TB
         C2["<b>Tier 2</b> — modules/<br/>audio · screen capture · <b>no camera</b>"]
         C1["<b>Tier 1</b> — core engine"]
@@ -59,8 +59,9 @@ flowchart TB
     end
 ```
 
-Mobile and the Web sit on tier 3; Windows and Linux sit on tier 2; macOS sits on an incomplete
-tier 2 while its tier 3 goes unbuilt. In table form:
+Mobile and the Web sit on tier 3; Windows and Linux sit on tier 2. The macOS dylib sits on an
+incomplete tier 2, but nothing consumes it — Mac Catalyst runs on the iOS xcframework. In table
+form:
 
 | Tier | Android | iOS | macOS | Windows | Linux | Web |
 |---|---|---|---|---|---|---|
@@ -99,10 +100,13 @@ not exist for that platform upstream.
 |---|---|---|---|
 | Android | this repository | `libwebrtc.aar` | Java bindings |
 | iOS | this repository | `WebRTC.xcframework` | Objective-C bindings |
-| macOS | this repository | `libwebrtc.dylib` | P/Invoke |
+| macOS | this repository | `libwebrtc.dylib` | *not consumed* |
 | Windows | this repository | `webrtc.dll` | P/Invoke |
 | Linux | this repository | `libwebrtc.so` | P/Invoke |
 | Web | Google · Mozilla · Apple | the browser binary | JSInterop over `RTCPeerConnection` |
+
+Mac Catalyst does not appear as a row because it is not a separate build: it is served by the iOS
+`WebRTC.xcframework`, whose default arch list includes `catalyst:arm64` and `catalyst:x64`.
 
 Chrome and Edge compile this tree as part of Chromium. Firefox maintains its own embedding —
 `build_with_mozilla` guards appear in 9 build files. Safari uses WebKit's fork. There is no wasm or
@@ -149,18 +153,19 @@ endpoints, or with SFUs on their H.264 path. Blazor users are unaffected — the
 Enabling it means setting `proprietary_codecs=true`, which carries MPEG-LA licensing implications
 for whoever distributes the result. That is a deliberate decision, not a build tweak.
 
-### macOS is the only self-inflicted gap
+### The macOS dylib has no camera — and that is fine
 
-WebRTC ships `sdk:mac_framework_objc` with AVFoundation capture, Metal rendering
-(`RTCMTLNSVideoView`) and VideoToolbox H.264 — the same completeness as iOS. This repository builds
-the raw C++ `webrtc` target instead, so macOS receives none of it.
+`modules/video_capture/` contains only `linux/` and `windows/`. There is no `mac/`, so the macOS
+`.dylib` this repository builds has no camera capture path at all. WebRTC does ship
+`sdk:mac_framework_objc` with AVFoundation capture, Metal rendering (`RTCMTLNSVideoView`) and
+VideoToolbox H.264 — we simply build the raw C++ target instead.
 
-`modules/video_capture/` contains only `linux/` and `windows/`. There is no `mac/`. **The macOS
-`.dylib` has no camera capture path at all.**
+**This is not a gap worth closing.** WebRTCme targets `net10.0-maccatalyst`, not `net10.0-macos`,
+and Mac Catalyst is served by the *iOS* xcframework — which is why the iOS workflow's default arch
+list includes `catalyst:arm64` and `catalyst:x64`. Nothing consumes `libwebrtc.dylib`.
 
-Closing this means building `sdk:mac_framework_objc` rather than `webrtc` in
-[WebRtcNativeMacOsSharedLib](Workflow-reference), which produces a framework instead of a dylib and
-changes how the bindings consume it.
+The macOS workflows are kept for completeness and as a check that the tree still builds on Apple
+silicon. Treat their artifacts as unconsumed unless someone adopts a native AppKit target.
 
 ### Screen capture runs the other way
 
