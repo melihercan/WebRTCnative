@@ -31,6 +31,7 @@ chromiumdash.appspot.com          webrtc.googlesource.com
 | [Running a build](Running-a-build) | Dispatching a workflow, the inputs, where the artifact lands |
 | [Branch selection](Branch-selection) | How the WebRTC branch is chosen, and why it is no longer hard-coded |
 | [Platform layers](Platform-layers) | What is actually inside each artifact, and what is missing |
+| [Prebuilt distributions](Prebuilt-distributions) | Other projects that build WebRTC, and how they compare |
 | [Workflow reference](Workflow-reference) | All eight workflows, step by step |
 | [Shared library patch](Shared-library-patch) | Turning WebRTC's static-only build into a DLL / .so / .dylib |
 | [Consuming the artifacts](Consuming-the-artifacts) | Wiring the binaries into WebRTCme |

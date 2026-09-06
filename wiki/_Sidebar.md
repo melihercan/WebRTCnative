@@ -9,6 +9,7 @@
 
 **Reference**
 - [Platform layers](Platform-layers)
+- [Prebuilt distributions](Prebuilt-distributions)
 - [Workflow reference](Workflow-reference)
 - [Shared library patch](Shared-library-patch)
 - [Repository layout](Repository-layout)

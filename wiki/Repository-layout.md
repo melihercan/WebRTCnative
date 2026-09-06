@@ -83,6 +83,10 @@ and cross-platform CMake.
 
 ## Why keep the dormant directories
 
+[webrtc-sdk/libwebrtc](https://github.com/webrtc-sdk/libwebrtc), the project `WebRtcInterop/` was
+started from, is still actively maintained — see [Prebuilt distributions](Prebuilt-distributions).
+Anyone reviving that directory should compare against it rather than the vendored snapshot.
+
 They record an intended direction, and `WebRtcInterop/BUILD.gn` is a genuinely useful starting
 point — the dependency list for a WebRTC shared library that exposes a custom API is not obvious.
 They are documented here so that neither is mistaken for working code.
