@@ -1,6 +1,6 @@
 # Workflow reference
 
-Eight workflows, all `workflow_dispatch` only — nothing runs on push or pull request. Building
+Nine workflows, all `workflow_dispatch` only — nothing runs on push or pull request. Building
 WebRTC costs about an hour of runner time, so it happens when asked and not otherwise.
 
 | Workflow | Runner | Output | Consumed by |
@@ -12,7 +12,8 @@ WebRTC costs about an hour of runner time, so it happens when asked and not othe
 | `WebRtcNativeMacOsStaticLib` | `macos-latest` | `libwebrtc.a` | *not consumed* |
 | `WebRtcNativeMacOsSharedLib` | `macos-latest` | `libwebrtc.dylib` | *not consumed* |
 | `WebRtcNativeAndroidLib` | `ubuntu-latest` | `libwebrtc.aar` | `WebRTCme.Bindings.Maui.Android` |
-| `WebRtcNativeIosLib` | `macos-latest` | `WebRTC.xcframework` | `WebRTCme.Bindings.Maui.iOS` |
+| `WebRtcNativeIosLib` | `macos-latest` | `WebRTC.xcframework` (iOS slices) | `WebRTCme.Bindings.Maui.iOS` |
+| `WebRtcNativeMacCatalystLib` | `macos-latest` | `WebRTC.xcframework` (Catalyst slices) | `WebRTCme.Bindings.Maui.MacCatalyst` |
 
 ## Shared skeleton
 
@@ -108,13 +109,22 @@ most here.
 
 ## iOS and Mac Catalyst specifics
 
-Fetches `webrtc_ios`, then runs `tools_webrtc/ios/build_ios_libs.py`.
+Two workflows, one toolchain. Both fetch `webrtc_ios` and run
+`tools_webrtc/ios/build_ios_libs.py`; only the arch list differs, because Mac Catalyst is an iOS
+app running on a Mac rather than a separate platform.
 
-The default `arch` list is:
+| Workflow | Default `arch` |
+|---|---|
+| `WebRtcNativeIosLib` | `device:arm64 simulator:arm64 simulator:x64` |
+| `WebRtcNativeMacCatalystLib` | `catalyst:arm64 catalyst:x64` |
 
-```
-device:arm64 simulator:arm64 simulator:x64 catalyst:arm64 catalyst:x64
-```
+They are split to match the split on the bindings side, where iOS and Mac Catalyst are separate
+projects. The cost is a second macOS run — the priciest runner, and roughly 40 minutes of each run
+is `gclient sync` over an identical tree.
+
+> **Run them against the same branch.** Two independently dispatched workflows can resolve to
+> different milestones if a rollover happens between them. When refreshing Apple support, pin
+> `webrtc_branch` explicitly on both rather than leaving it blank.
 
 `build_ios_libs.py` accepts these values (`ENABLED_ARCHS`):
 
@@ -127,10 +137,10 @@ device:arm64 simulator:arm64 simulator:x64 catalyst:arm64 catalyst:x64
 | `catalyst:x64` | Mac Catalyst on Intel |
 | `arm64`, `x64` | legacy aliases, device only |
 
-Upstream's own default omits the catalyst slices. This repository includes them so a single
-xcframework serves both `net10.0-ios` and `net10.0-maccatalyst` in WebRTCme.
+Upstream's own default omits the catalyst slices entirely, which is why
+`WebRtcNativeMacCatalystLib` names them explicitly.
 
-> The previous version of this workflow passed `--arch arm64 x64`. Those legacy aliases mean
+> An earlier version of the iOS workflow passed `--arch arm64 x64`. Those legacy aliases mean
 > *device only*, so the resulting xcframework had no simulator and no Catalyst slice.
 
 The framework is zipped before upload. `upload-artifact` does not preserve symlinks, and an

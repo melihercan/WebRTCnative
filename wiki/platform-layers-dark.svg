@@ -6,7 +6,7 @@
 <text x="486.0" y="42" fill="#9DAAB6" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="14" font-weight="600" text-anchor="middle">iOS</text>
 <text x="486.0" y="58" fill="#74828F" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10.5" font-weight="400" text-anchor="middle">WebRTCnative</text>
 <text x="662.0" y="42" fill="#9DAAB6" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="14" font-weight="600" text-anchor="middle">Mac Catalyst</text>
-<text x="662.0" y="58" fill="#74828F" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10.5" font-weight="400" text-anchor="middle">via iOS framework</text>
+<text x="662.0" y="58" fill="#74828F" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10.5" font-weight="400" text-anchor="middle">WebRTCnative</text>
 <text x="838.0" y="42" fill="#9DAAB6" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="14" font-weight="600" text-anchor="middle">Windows</text>
 <text x="838.0" y="58" fill="#74828F" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10.5" font-weight="400" text-anchor="middle">WebRTCnative</text>
 <text x="1014.0" y="42" fill="#9DAAB6" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="14" font-weight="600" text-anchor="middle">Linux</text>
@@ -29,7 +29,7 @@
 <rect x="578" y="68" width="168" height="86" rx="3" fill="#10281C" stroke="#5BBE8A"/>
 <text x="662.0" y="98" fill="#5BBE8A" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="700" text-anchor="middle">●</text>
 <text x="662.0" y="116" fill="#5BBE8A" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">WebRTC.xcframework</text>
-<text x="662.0" y="129" fill="#5BBE8A" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">catalyst: slices</text>
+<text x="662.0" y="129" fill="#5BBE8A" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">catalyst: only</text>
 <rect x="754" y="68" width="168" height="86" rx="3" fill="none" stroke="#27323D" stroke-dasharray="4 3"/>
 <text x="838.0" y="106" fill="#74828F" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" font-weight="700" text-anchor="middle">—</text>
 <text x="838.0" y="124" fill="#74828F" font-family="ui-monospace,'Cascadia Code',Consolas,'DejaVu Sans Mono',monospace" font-size="10" font-weight="400" text-anchor="middle">none upstream</text>

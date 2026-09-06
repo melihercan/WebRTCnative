@@ -31,7 +31,8 @@ Every run prints the branch it resolved and records it in the job summary. Expec
 | `WebRtcNativeMacOsStaticLib` | macos | `libwebrtc.a` |
 | `WebRtcNativeMacOsSharedLib` | macos | `libwebrtc.dylib` |
 | `WebRtcNativeAndroidLib` | ubuntu | `libwebrtc.aar` |
-| `WebRtcNativeIosLib` | macos | `WebRTC.xcframework` |
+| `WebRtcNativeIosLib` | macos | `WebRTC.xcframework` (iOS slices) |
+| `WebRtcNativeMacCatalystLib` | macos | `WebRTC.xcframework` (Catalyst slices) |
 
 Artifact names carry the milestone and branch, e.g. `webrtc-linux-x64-shared-m152-7977`.
 
@@ -44,9 +45,9 @@ dynamic workflows patch the checkout before generating build files. See
 
 ### Mobile
 
-Android and iOS libraries are built for the .NET MAUI bindings. The iOS xcframework includes Mac
-Catalyst slices alongside device and simulator, so one framework serves both `net10.0-ios` and
-`net10.0-maccatalyst`.
+Android, iOS and Mac Catalyst libraries are built for the .NET MAUI bindings. Catalyst has its own
+workflow rather than sharing the iOS xcframework, matching the split on the bindings side; both use
+the same iOS toolchain and differ only in the arch list.
 
 ## Documentation
 
@@ -54,7 +55,7 @@ Catalyst slices alongside device and simulator, so one framework serves both `ne
 |---|---|
 | [Running a build](../../wiki/Running-a-build) | inputs, artifacts, timings |
 | [Branch selection](../../wiki/Branch-selection) | how the WebRTC branch is chosen |
-| [Workflow reference](../../wiki/Workflow-reference) | all eight workflows in detail |
+| [Workflow reference](../../wiki/Workflow-reference) | all nine workflows in detail |
 | [Shared library patch](../../wiki/Shared-library-patch) | the static-to-shared conversion |
 | [Consuming the artifacts](../../wiki/Consuming-the-artifacts) | wiring the output into WebRTCme |
 | [Troubleshooting](../../wiki/Troubleshooting) | failures and what they mean |

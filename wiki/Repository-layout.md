@@ -2,7 +2,7 @@
 
 ```
 .github/
-  workflows/                       the eight build pipelines
+  workflows/                       the nine build pipelines
   actions/resolve-webrtc-branch/   shared branch resolution
     action.yml
     resolve_webrtc_branch.py
@@ -16,7 +16,7 @@ LICENSE                            MIT
 
 ## `.github/`
 
-The working content of the repository. Eight workflows, described in
+The working content of the repository. Nine workflows, described in
 [Workflow reference](Workflow-reference), plus one composite action holding the branch-resolution
 logic they all share ([Branch selection](Branch-selection)).
 

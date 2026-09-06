@@ -66,9 +66,9 @@ Tier 2 being blank on the Apple and Android columns is not a gap. They do the sa
 `modules/audio_device/` contains `win/`, `mac/` and `linux/` and no mobile directories, because
 iOS pulls `sdk:audio_device` instead. Same responsibility, different layer.
 
-Mac Catalyst is not a separate build. It is an iOS app running on a Mac, so it rides the iOS
-`WebRTC.xcframework` — which is why that workflow's default arch list includes `catalyst:arm64`
-and `catalyst:x64`. Everything true of iOS below is true of Catalyst.
+Mac Catalyst is an iOS app running on a Mac, so it is built with the iOS toolchain and everything
+true of iOS below is true of Catalyst — except screen capture, which WebRTC gates on being a Mac
+rather than on running on one. It has its own workflow and binding project all the same.
 
 ## Capability by platform
 
@@ -98,13 +98,15 @@ Mac Catalyst counts as iOS there, not as a Mac.
 |---|---|---|---|
 | Android | this repository | `libwebrtc.aar` | Java bindings |
 | iOS | this repository | `WebRTC.xcframework` | Objective-C bindings |
-| Mac Catalyst | this repository | the same `WebRTC.xcframework` | Objective-C bindings |
+| Mac Catalyst | this repository | `WebRTC.xcframework` (Catalyst slices) | Objective-C bindings |
 | Windows | this repository | `webrtc.dll` | P/Invoke |
 | Linux | this repository | `libwebrtc.so` | P/Invoke |
 | Web | Google · Mozilla · Apple | the browser binary | JSInterop over `RTCPeerConnection` |
 
-Mac Catalyst shares iOS's row artifact rather than having its own: one xcframework carries both,
-which is why the iOS workflow's default arch list includes `catalyst:arm64` and `catalyst:x64`.
+Mac Catalyst has its own workflow and its own binding project, even though it is built with the
+iOS toolchain — `WebRtcNativeMacCatalystLib` runs the same `build_ios_libs.py` with
+`--arch catalyst:arm64 catalyst:x64`. Dispatch it and the iOS workflow against the same
+`webrtc_branch`, or they can land on different milestones.
 
 A `libwebrtc.dylib` for native macOS is also built, but nothing consumes it — WebRTCme targets
 `net10.0-maccatalyst`, not `net10.0-macos`. Those workflows are kept as a check that the tree still

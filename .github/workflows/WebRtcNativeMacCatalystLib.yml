@@ -1,15 +1,15 @@
-# Builds WebRTC.xcframework for the MAUI iOS binding (net10.0-ios).
+# Builds WebRTC.xcframework for the MAUI Mac Catalyst binding
+# (net10.0-maccatalyst).
 #
-# Mac Catalyst has its own workflow, WebRtcNativeMacCatalystLib, matching the
-# split on the bindings side. Run both against the same webrtc_branch when
-# refreshing Apple support, or they can land on different milestones.
+# Catalyst is an iOS app running on a Mac, so this is the iOS toolchain with a
+# different arch list -- webrtc_ios is fetched and build_ios_libs.py does the
+# work, exactly as for iOS. Upstream's default arch list omits the catalyst
+# slices entirely, which is why they are named explicitly here.
 #
-# Valid values (from tools_webrtc/ios/build_ios_libs.py ENABLED_ARCHS):
-#   device:arm64  simulator:arm64  simulator:x64  catalyst:arm64  catalyst:x64
-# The bare aliases arm64 and x64 are also accepted but mean device-only, which
-# is what an earlier version of this workflow was unintentionally requesting.
+# Run this and WebRtcNativeIosLib against the same webrtc_branch when
+# refreshing Apple support, or the two can land on different milestones.
 
-name: WebRtcNativeIosLib
+name: WebRtcNativeMacCatalystLib
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ on:
       arch:
         description: 'Slices to build, space separated.'
         required: false
-        default: 'device:arm64 simulator:arm64 simulator:x64'
+        default: 'catalyst:arm64 catalyst:x64'
       build_config:
         description: 'Build configuration'
         required: false
@@ -68,7 +68,8 @@ jobs:
           set -euxo pipefail
           mkdir -p "$HOME/webrtc-checkout"
           cd "$HOME/webrtc-checkout"
-          # webrtc_ios pulls the iOS-specific deps build_ios_libs.py needs.
+          # webrtc_ios pulls the deps build_ios_libs.py needs; Catalyst is
+          # built from the same solution as iOS.
           fetch --nohooks webrtc_ios
           cd src
           git fetch origin "+refs/branch-heads/${BRANCH}:refs/remotes/branch-heads/${BRANCH}"
@@ -116,7 +117,7 @@ jobs:
       - name: Upload the xcframework
         uses: actions/upload-artifact@v4
         with:
-          name: webrtc-ios-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
+          name: webrtc-maccatalyst-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
           path: WebRTC.xcframework.zip
           if-no-files-found: error
           retention-days: 30

@@ -11,16 +11,20 @@ each artifact to the project that consumes it.
 | `libwebrtc.so` | `WebRTCme.Bindings/WebRTCme.Bindings.Native` | Linux P/Invoke target |
 | `libwebrtc.dylib` | *(none — see below)* | built for completeness, not consumed |
 | `libwebrtc.aar` | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.Android` | Java binding source |
-| `WebRTC.xcframework` | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.iOS` | ObjC binding source — **iOS and Mac Catalyst** |
+| `WebRTC.xcframework` (iOS slices) | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.iOS` | ObjC binding source |
+| `WebRTC.xcframework` (Catalyst slices) | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.MacCatalyst` | ObjC binding source |
 | `webrtc.lib`, `libwebrtc.a` | *(none)* | for linking native C/C++ against WebRTC |
 
 [Platform layers](Platform-layers) records what each of these artifacts actually contains — the
 desktop ones are missing H.264 entirely. Read it before assuming a capability is present.
 
-**One xcframework covers iOS and Mac Catalyst.** WebRTCme targets `net10.0-ios` and
-`net10.0-maccatalyst`, and both are served by the same artifact — the iOS workflow's default arch
-list carries `catalyst:arm64` and `catalyst:x64` for exactly that reason. There is no separate
-Catalyst build to run.
+**iOS and Mac Catalyst are built separately**, matching the split on the bindings side.
+`WebRtcNativeIosLib` produces device and simulator slices; `WebRtcNativeMacCatalystLib` produces
+the Catalyst ones. Both are `WebRTC.xcframework`, so keep them in their own directories when you
+download both — the artifact names disambiguate, the file names do not.
+
+Pin `webrtc_branch` on both when refreshing Apple support, or a milestone rollover between the two
+runs will leave iOS and Catalyst on different WebRTC versions.
 
 `libwebrtc.dylib` for native macOS is built but has no consumer; those workflows are kept as a
 check that the tree still builds on Apple silicon.

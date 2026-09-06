@@ -47,8 +47,9 @@ Platform-specific:
 | Linux ×2 | `target_cpu` | `x64` | `x64`, `arm64`, `arm` |
 | macOS ×2 | `target_cpu` | `arm64` | `arm64`, `x64` |
 | Android | `arch` | *(empty = all ABIs)* | space-separated, e.g. `arm64-v8a x86_64` |
-| iOS | `arch` | `device:arm64 simulator:arm64 simulator:x64 catalyst:arm64 catalyst:x64` | see [Workflow reference](Workflow-reference) |
-| iOS | `build_config` | `release` | `release`, `debug` |
+| iOS | `arch` | `device:arm64 simulator:arm64 simulator:x64` | see [Workflow reference](Workflow-reference) |
+| Mac Catalyst | `arch` | `catalyst:arm64 catalyst:x64` | see [Workflow reference](Workflow-reference) |
+| iOS, Mac Catalyst | `build_config` | `release` | `release`, `debug` |
 
 macOS defaults to `arm64` because `macos-latest` runners are Apple silicon. Select `x64` for a
 library that runs on Intel Macs.
@@ -66,7 +67,8 @@ Names carry the milestone and branch, so downloads from different runs never col
 | MacOsStaticLib | `webrtc-macos-arm64-static-m152-7977` | `libwebrtc.a` |
 | MacOsSharedLib | `webrtc-macos-arm64-shared-m152-7977` | `libwebrtc.dylib` |
 | AndroidLib | `webrtc-android-m152-7977` | `libwebrtc.aar` |
-| IosLib | `webrtc-ios-m152-7977` | `WebRTC.xcframework.zip` |
+| IosLib | `webrtc-ios-m152-7977` | `WebRTC.xcframework.zip` (iOS slices) |
+| MacCatalystLib | `webrtc-maccatalyst-m152-7977` | `WebRTC.xcframework.zip` (Catalyst slices) |
 
 Retention is 30 days. Download anything you intend to keep, or attach it to a release.
 

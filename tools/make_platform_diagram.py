@@ -40,12 +40,12 @@ THEMES = {
 }
 
 # Mac Catalyst rather than macOS: Catalyst is what WebRTCme ships
-# (net10.0-maccatalyst) and it rides the iOS xcframework. The macOS dylib is
+# (net10.0-maccatalyst) and has its own workflow and binding. The macOS dylib is
 # still built but nothing consumes it, so it does not earn a column here.
 PLATFORMS = [
     ("Android", "WebRTCnative"),
     ("iOS", "WebRTCnative"),
-    ("Mac Catalyst", "via iOS framework"),
+    ("Mac Catalyst", "WebRTCnative"),
     ("Windows", "WebRTCnative"),
     ("Linux", "WebRTCnative"),
     ("Web", "browser vendor"),
@@ -58,7 +58,7 @@ TIERS = [
         [
             ("yes", "●", ["sdk/android", "Java + JNI"]),
             ("yes", "●", ["framework_objc", "Objective-C"]),
-            ("yes", "●", ["WebRTC.xcframework", "catalyst: slices"]),
+            ("yes", "●", ["WebRTC.xcframework", "catalyst: only"]),
             ("none", "—", ["none upstream"]),
             ("none", "—", ["none upstream"]),
             ("host", "●", ["the browser", "Chromium //media"]),

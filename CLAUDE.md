@@ -70,7 +70,7 @@ cd WebRTCnative.wiki; git add -A; git commit -m "Update wiki"; git push
 
 ## Layout
 
-- `.github/workflows/` — eight `workflow_dispatch`-only build pipelines, one per platform and
+- `.github/workflows/` — nine `workflow_dispatch`-only build pipelines, one per platform and
   link type.
 - `.github/actions/resolve-webrtc-branch/` — composite action plus `resolve_webrtc_branch.py`,
   the shared branch-resolution logic every workflow calls first.
@@ -118,7 +118,7 @@ CI before you touch resolution logic (see Commands).
 
 ## The workflows
 
-All eight are manual only — nothing runs on push or PR. Shared skeleton: checkout → resolve branch
+All nine are manual only — nothing runs on push or PR. Shared skeleton: checkout → resolve branch
 → (Linux: free disk) → install `depot_tools` first on `PATH` → bootstrap `gclient` → git identity →
 `fetch --nohooks` + explicit branch-head fetch/checkout + `gclient sync` → (shared builds: patch) →
 `gn gen` + `autoninja -C out/Default webrtc` → locate output → `upload-artifact@v4`.
@@ -132,7 +132,8 @@ All eight are manual only — nothing runs on push or PR. Shared skeleton: check
 | MacOsStaticLib | macos | `libwebrtc.a` |
 | MacOsSharedLib | macos | `libwebrtc.dylib` |
 | AndroidLib | ubuntu | `libwebrtc.aar` |
-| IosLib | macos | `WebRTC.xcframework.zip` |
+| IosLib | macos | `WebRTC.xcframework.zip` (iOS slices) |
+| MacCatalystLib | macos | `WebRTC.xcframework.zip` (Catalyst slices) |
 
 ### The shared-library patch
 
@@ -166,12 +167,14 @@ macOS), PowerShell `(Get-Content …).replace(…)` / `-notmatch`.
 - **macOS** — `macos-latest` is Apple silicon, so `target_cpu` defaults to `arm64`.
 - **Android** — fetches `webrtc_android` (pulls SDK/NDK). No shared-library patch; `build_aar.py`
   already produces JNI `.so`s plus the Java API.
-- **iOS** — fetches `webrtc_ios`. Default arch list is
-  `device:arm64 simulator:arm64 simulator:x64 catalyst:arm64 catalyst:x64`, which is upstream's
-  default **plus Catalyst**, so one xcframework covers `net10.0-ios` and `net10.0-maccatalyst`.
-  The bare aliases `arm64` / `x64` mean *device only* — the old workflow used them and shipped an
-  xcframework with no simulator or Catalyst slice. The framework is zipped before upload because
-  `upload-artifact` does not preserve the symlinks an xcframework needs.
+- **iOS and Mac Catalyst** — two workflows, one toolchain: both fetch `webrtc_ios` and run
+  `build_ios_libs.py`, differing only in `--arch` (`device:arm64 simulator:arm64 simulator:x64`
+  versus `catalyst:arm64 catalyst:x64`). Split to match the bindings, which are separate projects.
+  Upstream's default omits catalyst entirely, and the bare aliases `arm64` / `x64` mean *device
+  only* — an old version used them and shipped an xcframework with neither simulator nor Catalyst.
+  Both frameworks are zipped before upload because `upload-artifact` does not preserve the symlinks
+  an xcframework needs. **Dispatch both against the same `webrtc_branch`** or a milestone rollover
+  between runs leaves iOS and Catalyst on different WebRTC versions.
 
 ## What is actually in each artifact
 
@@ -187,10 +190,10 @@ Three consequences that will otherwise be rediscovered by debugging a null facto
   which is false, so OpenH264 is never compiled (verified: 0 objects). The DLL still exports 26
   H.264 symbols for SDP/RTP, but `h264.cc:174` is `return nullptr`. Browsers get H.264 from the
   same tree via `media_use_openh264` — one flag apart.
-- **Mac Catalyst rides the iOS xcframework — it is not a separate build.** WebRTCme targets
-  `net10.0-ios` and `net10.0-maccatalyst`, both served by one artifact, which is why the iOS
-  workflow's arch list carries `catalyst:arm64` and `catalyst:x64`. Catalyst therefore has the full
-  integration layer: VideoToolbox H.264, AVFoundation capture, Metal rendering.
+- **Mac Catalyst is built with the iOS toolchain but shipped separately.** It has its own
+  workflow and its own binding project. Catalyst has the full integration layer — VideoToolbox
+  H.264, AVFoundation capture, Metal rendering — but no screen capture, since
+  `rtc_desktop_capture_supported` counts it as iOS rather than as a Mac.
 - **The macOS dylib is built but unconsumed.** `modules/video_capture/` has `linux/` and
   `windows/` only, so it has no camera path — which costs nothing, because nothing uses it. Those
   workflows are kept deliberately as an Apple-silicon build check; do not "fix" them by switching
