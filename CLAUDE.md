@@ -83,9 +83,8 @@ cd WebRTCnative.wiki; git add -A; git commit -m "Update wiki"; git push
   `src/Interop.cc` has three factory exports and a stalled `CallCreatePeerConnectionFactory`;
   `include/Interop.h` and `test/Tests.cc` are still empty. Folded in from a standalone repo in
   2026; that history is on the `archive/webrtcinterop-2023` branch.
-- `WebRtcNativeObjectsWrapper/` — **dormant.** VS CMake "Hello CMake" template plus a stubbed
-  `extern "C" CreateXxxObject()` with a commented-out body. Nothing references it.
-- `Links.md` — reading behind both dormant experiments.
+- `tools/make_platform_diagram.py` — regenerates the wiki's platform figure; run it after
+  changing the data, the SVGs are build output.
 
 ## Branch selection — the core design decision
 

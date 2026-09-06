@@ -43,15 +43,17 @@ see [Platform layers](Platform-layers).
 ## C API wrappers
 
 Not builders exactly — they wrap WebRTC's C++ API in a flat C ABI so it can be called by P/Invoke,
-FFI or similar. Directly relevant to the dormant `WebRtcInterop/` in this repository.
+FFI or similar. The same problem `WebRtcInterop/` in this repository solves; see
+[Interop ABI](Interop-ABI) for why we solve it ourselves rather than adopting one.
 
 | Project | ★ | Licence | Last push | Notes |
 |---|---|---|---|---|
 | [webrtc-sdk/libwebrtc](https://github.com/webrtc-sdk/libwebrtc) | 637 | MIT | 2026-09-03 | C++ wrapper for binary release, used by flutter-webrtc desktop |
 
-This is the project `WebRtcInterop/` was started from — `WebRtcInterop/NOTICE` carries its MIT
-notice, and `helper.h` and `BUILD.gn` came from it. Anyone reviving that directory should start by
-comparing against the current upstream rather than the vendored 2023 snapshot.
+This is the project `WebRtcInterop/` was originally started from in 2023 —
+`WebRtcInterop/NOTICE` still carries its MIT notice. Nothing of it survives in the current
+implementation, which was written from scratch against the ABI contract, but its header set remains
+the best available blueprint for the API shape a later slice should expose.
 
 ## WebRTC inside larger products
 

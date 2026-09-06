@@ -37,7 +37,7 @@ chromiumdash.appspot.com          webrtc.googlesource.com
 | [Shared library patch](Shared-library-patch) | Turning WebRTC's static-only build into a DLL / .so / .dylib |
 | [Consuming the artifacts](Consuming-the-artifacts) | Wiring the binaries into WebRTCme |
 | [Troubleshooting](Troubleshooting) | Failures seen in practice and what they mean |
-| [Repository layout](Repository-layout) | What each directory is, including the dormant ones |
+| [Repository layout](Repository-layout) | What each directory is |
 
 ## The short version
 

@@ -6,13 +6,19 @@
   actions/resolve-webrtc-branch/   shared branch resolution
     action.yml
     resolve_webrtc_branch.py
+WebRtcInterop/                     the C ABI shim — see below
+  include/Interop.h                the public ABI
+  src/                             implementation
+  test/                            C harnesses driving the built DLL
+tools/make_platform_diagram.py     regenerates the wiki figure
 wiki/                              source of these pages
-WebRtcInterop/                     dormant, see below
-WebRtcNativeObjectsWrapper/        dormant, see below
-Links.md                           reference links
 README.md
 LICENSE                            MIT
 ```
+
+Everything here is live. Two dormant experiments — `WebRtcNativeObjectsWrapper/`, a CMake
+"Hello CMake" sketch, and `Links.md`, a bookmark dump behind it — were removed once
+`WebRtcInterop/` became real; they are in the history if ever wanted.
 
 ## `.github/`
 
@@ -32,7 +38,7 @@ python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --branch 7
 These pages, kept in the repository so they are reviewed alongside the workflows they describe.
 The GitHub wiki is published from them; the repository `README.md` records the copy step.
 
-## `WebRtcInterop/` — the C ABI shim, in progress
+## `WebRtcInterop/` — the C ABI shim
 
 WebRTC's API is C++ and cannot be P/Invoked directly, so .NET needs a flat C surface in front of
 it. That is what this directory is, and it is the missing piece for a Windows binding that replaces
@@ -75,31 +81,6 @@ page as what to write into it.
 
 This work dates from 2023 and predates the current workflows. Its original standalone repository
 was folded in here; the full history is preserved on the `archive/webrtcinterop-2023` branch.
-
-## `WebRtcNativeObjectsWrapper/` — dormant
-
-A Visual Studio CMake template project — "Hello CMake" — plus a stub:
-
-```cpp
-#define EXPORT //// export directive for each platform
-class Xxx;
-
-extern "C" EXPORT Xxx * CreateXxxObject()
-{
-	////return new Xxx();
-}
-```
-
-An experiment in exporting C++ objects to C#, left at the sketch stage. `CMakePresets.json` has
-presets for Windows x64/x86, Linux and macOS. Nothing references it and no workflow builds it.
-
-`Links.md` collects the reading behind both experiments: C++/C# interop, marshalling C++ classes,
-and cross-platform CMake.
-
-## Why keep the dormant directory
-
-`WebRtcNativeObjectsWrapper/` records an intended direction and nothing more. It is documented
-here so it is not mistaken for working code.
 
 ## Conventions
 
