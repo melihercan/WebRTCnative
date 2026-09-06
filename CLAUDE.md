@@ -70,16 +70,19 @@ cd WebRTCnative.wiki; git add -A; git commit -m "Update wiki"; git push
 
 ## Layout
 
-- `.github/workflows/` — nine `workflow_dispatch`-only build pipelines, one per platform and
+- `.github/workflows/` — ten `workflow_dispatch`-only build pipelines, one per platform and
   link type.
 - `.github/actions/resolve-webrtc-branch/` — composite action plus `resolve_webrtc_branch.py`,
   the shared branch-resolution logic every workflow calls first.
 - `wiki/` — the documentation source. Keep it in step with workflow changes.
-- `WebRtcInterop/` — **dormant.** A C-ABI shim meant to be dropped into a WebRTC checkout as a
-  subdirectory (its `BUILD.gn` opens with `import("../webrtc.gni")` and depends on `../api`,
-  `../pc`, `../media`). `include/Interop.h`, `src/Interop.cc` and `test/Tests.cc` are all **zero
-  bytes** — only the build file and vendored files from
-  [webrtc-sdk/libwebrtc](https://github.com/webrtc-sdk/libwebrtc) have content. No workflow builds it.
+- `WebRtcInterop/` — **the C ABI shim, in progress.** WebRTC's C++ API cannot be P/Invoked, so
+  .NET needs a flat C surface; this is it, and it is the missing piece for a Windows binding that
+  replaces SIPSorcery. Built by `WebRtcNativeInteropWindows`, the only workflow that compiles code
+  from this repository. Its `BUILD.gn` only resolves from inside a WebRTC checkout, so the workflow
+  grafts the directory to `src/WebRtcInterop` and adds `"//WebRtcInterop"` to the root group.
+  `src/Interop.cc` has three factory exports and a stalled `CallCreatePeerConnectionFactory`;
+  `include/Interop.h` and `test/Tests.cc` are still empty. Folded in from a standalone repo in
+  2026; that history is on the `archive/webrtcinterop-2023` branch.
 - `WebRtcNativeObjectsWrapper/` — **dormant.** VS CMake "Hello CMake" template plus a stubbed
   `extern "C" CreateXxxObject()` with a commented-out body. Nothing references it.
 - `Links.md` — reading behind both dormant experiments.
@@ -118,7 +121,7 @@ CI before you touch resolution logic (see Commands).
 
 ## The workflows
 
-All nine are manual only — nothing runs on push or PR. Shared skeleton: checkout → resolve branch
+All ten are manual only — nothing runs on push or PR. Shared skeleton: checkout → resolve branch
 → (Linux: free disk) → install `depot_tools` first on `PATH` → bootstrap `gclient` → git identity →
 `fetch --nohooks` + explicit branch-head fetch/checkout + `gclient sync` → (shared builds: patch) →
 `gn gen` + `autoninja -C out/Default webrtc` → locate output → `upload-artifact@v4`.
@@ -134,6 +137,7 @@ All nine are manual only — nothing runs on push or PR. Shared skeleton: checko
 | AndroidLib | ubuntu | `libwebrtc.aar` |
 | IosLib | macos | `WebRTC.xcframework.zip` (iOS slices) |
 | MacCatalystLib | macos | `WebRTC.xcframework.zip` (Catalyst slices) |
+| InteropWindows | windows | `WebRtcInterop.dll` + component DLLs |
 
 ### The shared-library patch
 

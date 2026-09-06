@@ -1,0 +1,235 @@
+# Builds WebRtcInterop.dll for Windows — the C ABI shim that lets .NET call
+# WebRTC through P/Invoke, since WebRTC's own API is C++ and cannot be
+# P/Invoked directly.
+#
+# Unlike every other workflow here, this one builds code from THIS repository:
+# WebRtcInterop/ is copied into the WebRTC checkout and added to the root
+# build, because its BUILD.gn is written to sit inside the tree (it opens with
+# import("../webrtc.gni") and depends on ../api, ../pc, ../media).
+#
+# WebRtcInterop/src/Interop.cc is a work in progress — three factory exports
+# and a stalled CallCreatePeerConnectionFactory. This workflow exists so that
+# work is buildable again, not because the shim is finished.
+#
+# !!! IMPORTANT !!! Everything is kept on C:. The hosted runner's D: drive has
+# roughly 14 GB free, and a WebRTC checkout does not come close to fitting.
+
+name: WebRtcNativeInteropWindows
+
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_branch:
+        description: 'WebRTC branch-head to build, e.g. 7977. Leave empty for the latest stable Chromium milestone.'
+        required: false
+        default: ''
+      target_cpu:
+        description: 'Target CPU'
+        required: false
+        default: 'x64'
+        type: choice
+        options: ['x64', 'x86', 'arm64']
+
+env:
+  # Build with the Visual Studio installed on the runner rather than Google's
+  # internal toolchain, which we have no access to.
+  DEPOT_TOOLS_WIN_TOOLCHAIN: 0
+  DEPOT_TOOLS_DIR: C:\depot_tools
+  CHECKOUT_DIR: C:\webrtc-checkout
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve WebRTC branch
+        id: webrtc
+        uses: ./.github/actions/resolve-webrtc-branch
+        with:
+          webrtc_branch: ${{ inputs.webrtc_branch }}
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
+
+      - name: Locate Visual Studio
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $install = & $vswhere -latest -products * -property installationPath
+          $version = & $vswhere -latest -products * -property installationVersion
+          if (-not $install) { throw 'vswhere could not find a Visual Studio installation.' }
+
+          # Chromium's build/vs_toolchain.py identifies releases by year and
+          # reads vs<year>_install. The runners now ship VS 18, which it calls
+          # 2026. It also falls back to scanning %ProgramFiles%, so an unmapped
+          # version warns rather than failing.
+          $year = switch ([int]$version.Split('.')[0]) {
+            18 { '2026' } 17 { '2022' } 16 { '2019' } default { '' }
+          }
+          Write-Host "Visual Studio $version at $install"
+          "GYP_MSVS_OVERRIDE_PATH=$install" | Out-File $env:GITHUB_ENV -Append
+          if ($year) {
+            Write-Host "Exporting vs${year}_install"
+            "vs${year}_install=$install" | Out-File $env:GITHUB_ENV -Append
+          } else {
+            Write-Host "::warning::Visual Studio $version has no known Chromium year mapping; relying on path detection."
+          }
+
+      - name: Install depot_tools
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:DEPOT_TOOLS_DIR | Out-Null
+          $zip = Join-Path $env:DEPOT_TOOLS_DIR 'depot_tools.zip'
+          Invoke-WebRequest -Uri 'https://storage.googleapis.com/chrome-infra/depot_tools.zip' -OutFile $zip
+          7z x -y "-o$env:DEPOT_TOOLS_DIR" $zip
+          Remove-Item $zip
+          # depot_tools must come first so its python and git win over the runner's.
+          $env:DEPOT_TOOLS_DIR | Out-File $env:GITHUB_PATH -Append
+          & (Join-Path $env:DEPOT_TOOLS_DIR 'gclient.bat')
+
+      - name: Configure Git
+        shell: pwsh
+        run: |
+          # gclient refuses to run without an identity; this is not a commit author.
+          git config --global user.name  'github-actions'
+          git config --global user.email 'github-actions@users.noreply.github.com'
+          git config --global core.autocrlf false
+          git config --global core.filemode false
+          git config --global branch.autosetuprebase always
+
+      - name: Fetch WebRTC source
+        shell: pwsh
+        env:
+          BRANCH: ${{ steps.webrtc.outputs.branch }}
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:CHECKOUT_DIR | Out-Null
+          Set-Location $env:CHECKOUT_DIR
+          fetch --nohooks webrtc
+          Set-Location (Join-Path $env:CHECKOUT_DIR 'src')
+          $branch = $env:BRANCH
+          git fetch origin ('+refs/branch-heads/{0}:refs/remotes/branch-heads/{0}' -f $branch)
+          git checkout -B "webrtc-$branch" "refs/remotes/branch-heads/$branch"
+          gclient sync -D --force --reset
+          git log -1 --oneline
+
+      - name: Graft WebRtcInterop into the checkout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Join-Path $env:CHECKOUT_DIR 'src'
+          $dest = Join-Path $src 'WebRtcInterop'
+
+          # WebRtcInterop/BUILD.gn imports ../webrtc.gni and depends on sibling
+          # targets, so it only resolves from inside the tree.
+          Copy-Item -Recurse -Force (Join-Path $env:GITHUB_WORKSPACE 'WebRtcInterop') $dest
+          Write-Host "grafted to $dest"
+          Get-ChildItem $dest -Recurse -File | ForEach-Object {
+            Write-Host ("  {0,7} {1}" -f $_.Length, $_.FullName.Substring($dest.Length + 1))
+          }
+
+          if ((Get-Item (Join-Path $dest 'src\Interop.cc')).Length -eq 0) {
+            throw 'WebRtcInterop/src/Interop.cc is empty; there is nothing to build.'
+          }
+
+      - name: Patch for a shared library
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location (Join-Path $env:CHECKOUT_DIR 'src')
+
+          function Assert-Match($file, $pattern, $what) {
+            if (-not (Select-String -Path $file -Pattern $pattern -SimpleMatch -Quiet)) {
+              throw "Expected $what in $file. The patch needs updating for this WebRTC branch."
+            }
+          }
+
+          Assert-Match 'BUILD.gn'           'rtc_static_library'                         'rtc_static_library'
+          Assert-Match 'BUILD.gn'           'complete_static_lib'                        'complete_static_lib'
+          Assert-Match 'BUILD.gn'           'deps = [ ":webrtc" ]'                       'the root default group'
+          Assert-Match 'webrtc.gni'         '!build_with_chromium && is_component_build' 'the component_build guard'
+          Assert-Match 'webrtc.gni'         'if (build_with_chromium && defined(deps))'  'the Chromium-gated Abseil remap'
+          Assert-Match 'rtc_tools\BUILD.gn' ':frame_analyzer'                            'the frame_analyzer dependency'
+
+          # Edits 1-5 are the standard shared-library patch; see the wiki page.
+          (Get-Content BUILD.gn).replace('rtc_static_library', 'rtc_shared_library') | Set-Content BUILD.gn
+          (Get-Content BUILD.gn) -notmatch 'complete_static_lib' | Set-Content BUILD.gn
+          (Get-Content webrtc.gni).replace('!build_with_chromium && is_component_build', 'false') | Set-Content webrtc.gni
+          (Get-Content rtc_tools\BUILD.gn) -notmatch ':frame_analyzer' | Set-Content rtc_tools\BUILD.gn
+          (Get-Content webrtc.gni).replace('if (build_with_chromium && defined(deps))', 'if (defined(deps))') | Set-Content webrtc.gni
+
+          # Edit 6 is specific to this workflow: hang the grafted target off the
+          # root group so `ninja default` reaches it.
+          (Get-Content BUILD.gn).replace('deps = [ ":webrtc" ]', 'deps = [ ":webrtc", "//WebRtcInterop" ]') | Set-Content BUILD.gn
+          Assert-Match 'BUILD.gn' '"//WebRtcInterop"' 'the grafted interop dependency'
+
+      - name: Build
+        shell: pwsh
+        env:
+          TARGET_CPU: ${{ inputs.target_cpu || 'x64' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location (Join-Path $env:CHECKOUT_DIR 'src')
+
+          # Arguments go into args.gn rather than gn gen --args="...": PowerShell
+          # strips inner double quotes when handing a string to a native command,
+          # so gn would see target_os=win and reject it.
+          New-Item -ItemType Directory -Force -Path out/Default | Out-Null
+          $gnArgs = @(
+            'is_debug = false',
+            'target_os = "win"',
+            "target_cpu = `"$($env:TARGET_CPU)`"",
+            'is_component_build = true',
+            'rtc_enable_symbol_export = true',
+            'rtc_include_tests = false',
+            'rtc_build_tools = false',
+            'rtc_build_examples = false'
+          )
+          Set-Content -Path out/Default/args.gn -Value $gnArgs -Encoding utf8
+          Write-Host '--- args.gn ---'
+          Get-Content out/Default/args.gn
+
+          # pwsh does not fail a step on a non-zero native exit, so check.
+          gn gen out/Default
+          if ($LASTEXITCODE -ne 0) { throw "gn gen failed with exit code $LASTEXITCODE" }
+
+          autoninja -C out/Default WebRtcInterop
+          if ($LASTEXITCODE -ne 0) { throw "autoninja failed with exit code $LASTEXITCODE" }
+
+      - name: Collect WebRtcInterop.dll
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:CHECKOUT_DIR 'src\out\Default'
+          $staging = Join-Path $env:GITHUB_WORKSPACE 'webrtc-interop'
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+
+          if (-not (Test-Path (Join-Path $out 'WebRtcInterop.dll'))) {
+            throw 'WebRtcInterop.dll was not produced by the build.'
+          }
+
+          # A component build splits the tree across many DLLs, and the shim
+          # needs all of them at run time alongside webrtc.dll itself.
+          Get-ChildItem -Path $out -Filter '*.dll' -File | Copy-Item -Destination $staging
+          foreach ($extra in 'WebRtcInterop.dll.lib', 'WebRtcInterop.dll.pdb') {
+            $path = Join-Path $out $extra
+            if (Test-Path $path) { Copy-Item $path $staging }
+          }
+
+          Get-ChildItem $staging |
+            Select-Object Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 2) } } |
+            Format-Table -AutoSize
+          Write-Host ('Collected {0} files' -f (Get-ChildItem $staging).Count)
+
+      - name: Upload WebRtcInterop.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-interop-windows-${{ inputs.target_cpu || 'x64' }}-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
+          path: webrtc-interop/
+          if-no-files-found: error
+          retention-days: 30

@@ -1,6 +1,6 @@
 # Workflow reference
 
-Nine workflows, all `workflow_dispatch` only — nothing runs on push or pull request. Building
+Ten workflows, all `workflow_dispatch` only — nothing runs on push or pull request. Building
 WebRTC costs about an hour of runner time, so it happens when asked and not otherwise.
 
 | Workflow | Runner | Output | Consumed by |
@@ -14,6 +14,7 @@ WebRTC costs about an hour of runner time, so it happens when asked and not othe
 | `WebRtcNativeAndroidLib` | `ubuntu-latest` | `libwebrtc.aar` | `WebRTCme.Bindings.Maui.Android` |
 | `WebRtcNativeIosLib` | `macos-latest` | `WebRTC.xcframework` (iOS slices) | `WebRTCme.Bindings.Maui.iOS` |
 | `WebRtcNativeMacCatalystLib` | `macos-latest` | `WebRTC.xcframework` (Catalyst slices) | `WebRTCme.Bindings.Maui.MacCatalyst` |
+| `WebRtcNativeInteropWindows` | `windows-latest` | `WebRtcInterop.dll` | the future Windows binding |
 
 ## Shared skeleton
 
@@ -147,6 +148,25 @@ The framework is zipped before upload. `upload-artifact` does not preserve symli
 xcframework that loses its symlinks will not link. The zip is created from inside `out_ios_libs`
 so `WebRTC.xcframework` sits at the archive root, and uploaded with `compression-level: 0` because
 it is already compressed.
+
+## The interop workflow is different in kind
+
+`WebRtcNativeInteropWindows` is the only workflow that builds code from **this** repository.
+Everything else compiles Google's tree unmodified apart from the patch.
+
+It adds two steps to the Windows shape:
+
+- **Graft WebRtcInterop into the checkout** — copies `WebRtcInterop/` to `src/WebRtcInterop`,
+  because its `BUILD.gn` imports `../webrtc.gni` and only resolves from inside the tree. It fails
+  early if `src/Interop.cc` is empty, so a stripped copy cannot silently produce nothing.
+- **A sixth patch edit** — appends `"//WebRtcInterop"` to the root `group("default")` deps so
+  `ninja` reaches the grafted target. Asserted before and after, like the other five.
+
+It then builds the `WebRtcInterop` target rather than `webrtc`, and collects every DLL beside it:
+a component build splits across many, and the shim needs all of them at run time.
+
+The shim itself is unfinished — see [Repository layout](Repository-layout) for what
+`Interop.cc` does and does not do yet. The workflow exists so that work is buildable again.
 
 ## Action versions
 

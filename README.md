@@ -33,6 +33,7 @@ Every run prints the branch it resolved and records it in the job summary. Expec
 | `WebRtcNativeAndroidLib` | ubuntu | `libwebrtc.aar` |
 | `WebRtcNativeIosLib` | macos | `WebRTC.xcframework` (iOS slices) |
 | `WebRtcNativeMacCatalystLib` | macos | `WebRTC.xcframework` (Catalyst slices) |
+| `WebRtcNativeInteropWindows` | windows | `WebRtcInterop.dll` |
 
 Artifact names carry the milestone and branch, e.g. `webrtc-linux-x64-shared-m152-7977`.
 
@@ -55,7 +56,7 @@ the same iOS toolchain and differ only in the arch list.
 |---|---|
 | [Running a build](../../wiki/Running-a-build) | inputs, artifacts, timings |
 | [Branch selection](../../wiki/Branch-selection) | how the WebRTC branch is chosen |
-| [Workflow reference](../../wiki/Workflow-reference) | all nine workflows in detail |
+| [Workflow reference](../../wiki/Workflow-reference) | all ten workflows in detail |
 | [Shared library patch](../../wiki/Shared-library-patch) | the static-to-shared conversion |
 | [Consuming the artifacts](../../wiki/Consuming-the-artifacts) | wiring the output into WebRTCme |
 | [Troubleshooting](../../wiki/Troubleshooting) | failures and what they mean |

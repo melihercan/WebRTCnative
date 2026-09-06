@@ -98,7 +98,7 @@ to work.
 
 ## Implementation
 
-The logic lives in one place, used by all nine workflows:
+The logic lives in one place, used by all ten workflows:
 
 ```
 .github/actions/resolve-webrtc-branch/

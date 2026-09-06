@@ -2,7 +2,7 @@
 
 ```
 .github/
-  workflows/                       the nine build pipelines
+  workflows/                       the ten build pipelines
   actions/resolve-webrtc-branch/   shared branch resolution
     action.yml
     resolve_webrtc_branch.py
@@ -16,7 +16,7 @@ LICENSE                            MIT
 
 ## `.github/`
 
-The working content of the repository. Nine workflows, described in
+The working content of the repository. Ten workflows, described in
 [Workflow reference](Workflow-reference), plus one composite action holding the branch-resolution
 logic they all share ([Branch selection](Branch-selection)).
 
@@ -32,34 +32,47 @@ python .github/actions/resolve-webrtc-branch/resolve_webrtc_branch.py --branch 7
 These pages, kept in the repository so they are reviewed alongside the workflows they describe.
 The GitHub wiki is published from them; the repository `README.md` records the copy step.
 
-## `WebRtcInterop/` — dormant
+## `WebRtcInterop/` — the C ABI shim, in progress
 
-Intended as a C-ABI shim over the WebRTC C++ API, giving P/Invoke a flat surface to call.
+WebRTC's API is C++ and cannot be P/Invoked directly, so .NET needs a flat C surface in front of
+it. That is what this directory is, and it is the missing piece for a Windows binding that replaces
+SIPSorcery.
 
-**The implementation was never written.** `include/Interop.h`, `src/Interop.cc` and
-`test/Tests.cc` are all zero bytes. What exists is scaffolding:
+Built by [WebRtcNativeInteropWindows](Workflow-reference), which is the only workflow here that
+compiles code from this repository rather than from Google's tree.
 
 | File | Status |
 |---|---|
-| `BUILD.gn` | complete, declares `rtc_shared_library("libwebrtc")` with real dependencies |
-| `include/Interop.h` | **empty** |
-| `src/Interop.cc` | **empty** |
+| `BUILD.gn` | declares `rtc_shared_library("WebRtcInterop")` with its dependency list |
+| `src/Interop.cc` | three factory exports, plus a stalled `CallCreatePeerConnectionFactory` |
+| `include/Interop.h` | **empty** — the exports have no declared header yet |
 | `test/Tests.cc` | **empty** |
 | `helper.h` | vendored from webrtc-sdk/libwebrtc |
-| `.clang-format` | Chromium style |
-| `format.sh` | runs `dos2unix` + `clang-format` |
-| `NOTICE` | upstream MIT notice for the vendored files |
+| `.clang-format`, `format.sh`, `NOTICE` | Chromium style, formatter, upstream notice |
 
-No workflow builds this directory.
+### How it builds
 
-The `BUILD.gn` is not buildable from here in any case: it opens with `import("../webrtc.gni")` and
-depends on siblings such as `../api`, `../pc` and `../media`. It is written to be dropped **into a
-WebRTC checkout** as a subdirectory. Reviving it would mean writing the interop layer, copying the
-directory into `src/`, and adding it to the build.
+`BUILD.gn` opens with `import("../webrtc.gni")` and depends on siblings such as `../api`, `../pc`
+and `../media`, so it only resolves from **inside** a WebRTC checkout. The workflow therefore
+copies this directory to `src/WebRtcInterop` and appends `"//WebRtcInterop"` to the root
+`group("default")` deps so ninja reaches it. That graft is edit 6 on top of the standard
+[shared-library patch](Shared-library-patch).
 
-Note that WebRTCme's desktop support currently goes through SIPSorcery
-(`WebRTCme.Bindings.SipSorcery`) as well as the native path, so this shim is not on the critical
-path for anything today.
+### Where the work stopped
+
+`Interop.cc` exports `CreateBuiltinAudioEncoderFactory`, `CreateBuiltinVideoEncoderFactory` and
+`CreateBuiltinVideoDecoderFactory`. The video ones use `.release()` on a `unique_ptr`, which is
+sound; the audio one takes the address of a temporary `scoped_refptr`, which is not — it returns a
+dangling pointer.
+
+`CallCreatePeerConnectionFactory` is commented out entirely. That is the real problem this shim has
+to solve: WebRTC hands back `scoped_refptr` and `unique_ptr`, and neither survives a C boundary
+without an explicit ownership convention. [webrtc-sdk/libwebrtc](Prebuilt-distributions) is the
+project this was started from and has since solved exactly that, so compare against it before
+writing more.
+
+This work dates from 2023 and predates the current workflows. Its original standalone repository
+was folded in here; the full history is preserved on the `archive/webrtcinterop-2023` branch.
 
 ## `WebRtcNativeObjectsWrapper/` — dormant
 
@@ -81,15 +94,10 @@ presets for Windows x64/x86, Linux and macOS. Nothing references it and no workf
 `Links.md` collects the reading behind both experiments: C++/C# interop, marshalling C++ classes,
 and cross-platform CMake.
 
-## Why keep the dormant directories
+## Why keep the dormant directory
 
-[webrtc-sdk/libwebrtc](https://github.com/webrtc-sdk/libwebrtc), the project `WebRtcInterop/` was
-started from, is still actively maintained — see [Prebuilt distributions](Prebuilt-distributions).
-Anyone reviving that directory should compare against it rather than the vendored snapshot.
-
-They record an intended direction, and `WebRtcInterop/BUILD.gn` is a genuinely useful starting
-point — the dependency list for a WebRTC shared library that exposes a custom API is not obvious.
-They are documented here so that neither is mistaken for working code.
+`WebRtcNativeObjectsWrapper/` records an intended direction and nothing more. It is documented
+here so it is not mistaken for working code.
 
 ## Conventions
 

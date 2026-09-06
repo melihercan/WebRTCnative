@@ -21,7 +21,7 @@ config("external_config") {
   }
 }
 
-rtc_shared_library("libwebrtc") {
+rtc_shared_library("WebRtcInterop") {
   libs = []
   include_dirs = [
     ".",
@@ -37,6 +37,7 @@ rtc_shared_library("libwebrtc") {
     defines += [
       "LIB_WEBRTC_API_EXPORTS",
       "WEBRTC_WIN",
+      "WEBRTC_LIBRARY_IMPL",
     ]
   }
 
@@ -81,12 +82,13 @@ rtc_shared_library("libwebrtc") {
     #suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
   }
 
+##    "../api/crypto:frame_crypto_transformer",
+
   deps = [
     "../api:create_peerconnection_factory",
     "../api:libjingle_peerconnection_api",
     "../api/audio_codecs:builtin_audio_decoder_factory",
     "../api/audio_codecs:builtin_audio_encoder_factory",
-    "../api/crypto:frame_crypto_transformer",
     "../api/video:video_frame",
     "../api/video_codecs:builtin_video_decoder_factory",
     "../api/video_codecs:builtin_video_encoder_factory",
