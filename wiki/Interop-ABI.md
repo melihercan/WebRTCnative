@@ -211,10 +211,10 @@ caller, a C++ caller, or read as documentation without a toolchain.
 The smallest surface that carries an audio and video call between two Windows peers. Twenty-five
 functions, declared in `WebRtcInterop/include/Interop.h`.
 
-**Twenty-three are implemented**; the two audio enumeration functions return
-`RTC_ERR_UNSUPPORTED` and are explained under Devices. Two tests in `WebRtcInterop/test/` cover the
-rest: `Handshake.c` drives a full offer/answer/ICE exchange between two peer connections, and
-`FrameSink.c` opens a camera and checks the delivered frames.
+**All twenty-five are implemented.** Three tests in `WebRtcInterop/test/` cover them:
+`Handshake.c` drives a full offer/answer/ICE exchange between two peer connections, `FrameSink.c`
+opens a camera and checks the delivered frames, and `Devices.c` enumerates every device kind and
+exercises the error paths.
 
 ### Library — **implemented**
 
@@ -243,27 +243,35 @@ Wraps `CreatePeerConnectionFactory` with the builtin audio and video encoder and
 Note that on Windows the builtin video factory means **VP8, VP9 and AV1 only** — there is no H.264
 in a standalone build. See [Platform layers](Platform-layers).
 
-### Devices — **video implemented, audio deferred**
+### Devices — **implemented**
 
 ```c
 rtc_status rtc_video_device_count(rtc_factory* f, int32_t* out_count);
 rtc_status rtc_video_device_info(rtc_factory* f, int32_t index,
                                  char** out_name, char** out_id);
-rtc_status rtc_audio_device_count(rtc_factory* f, int32_t* out_count);
-rtc_status rtc_audio_device_info(rtc_factory* f, int32_t index,
+rtc_status rtc_audio_device_count(rtc_factory* f, rtc_audio_device_kind kind,
+                                  int32_t* out_count);
+rtc_status rtc_audio_device_info(rtc_factory* f, rtc_audio_device_kind kind,
+                                 int32_t index,
                                  char** out_name, char** out_id);
 ```
 
 Video is backed by `modules/video_capture` (DirectShow on Windows). Output strings are
 caller-owned; an out-of-range index returns `RTC_ERR_NOT_FOUND`.
 
-**The audio pair returns `RTC_ERR_UNSUPPORTED` for now.** Unlike video there is no free-standing
-enumerator: listing audio devices needs a live `AudioDeviceModule`, and `rtc_factory_create` passes
-null so the peer connection factory builds its own internally, out of reach. Getting one means
-creating it here — on Windows that is `CreateWindowsCoreAudioAudioDeviceModule`, which wants an
-`Environment` and a COM MTA thread — and handing the same instance to the factory. That changes how
-the factory is constructed, so it is its own slice. The exports exist and return a documented
-status, which beats a missing entry point.
+`kind` is `RTC_AUDIO_DEVICE_RECORDING` or `RTC_AUDIO_DEVICE_PLAYOUT`, mirroring W3C's
+`audioinput` / `audiooutput` split.
+
+Audio needs a live `AudioDeviceModule`, so `rtc_factory_create` builds one with
+`CreateAudioDeviceModule` and hands that same instance to the peer connection factory. Enumeration
+then reports the devices the engine will actually use, rather than a second module's view of them.
+
+The module has thread affinity to the worker thread, so it is created there and every call hops
+back with `BlockingCall`. A machine with no usable audio device is not fatal: the factory falls
+back to building its own, and enumeration reports `RTC_ERR_INTERNAL`.
+
+Some drivers report an empty endpoint GUID, so `out_id` falls back to the name — the caller always
+has something to select with.
 
 ### Tracks — **implemented**
 
