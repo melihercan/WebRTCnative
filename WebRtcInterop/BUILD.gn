@@ -53,10 +53,9 @@ rtc_shared_library("WebRtcInterop") {
     "src/Interop.cc",
   ]
 
-  # Slice one needs the factory, the peer connection API, the builtin codec
-  # factories and the threading primitives. Media capture, desktop capture and
-  # libyuv arrive with later slices; adding a dependency before the code that
-  # needs it only lengthens the link.
+  # video_capture_internal_impl is the one that carries the platform backends
+  # (DirectShow on Windows, V4L2 on Linux); video_capture_module alone is just
+  # the interface. Desktop capture and libyuv arrive with later slices.
   deps = [
     "../api:create_peerconnection_factory",
     "../api:peer_connection_interface",
@@ -64,7 +63,12 @@ rtc_shared_library("WebRtcInterop") {
     "../api/audio_codecs:builtin_audio_encoder_factory",
     "../api/video_codecs:builtin_video_decoder_factory",
     "../api/video_codecs:builtin_video_encoder_factory",
+    "../api:media_stream_interface",
+    "../api/video:adapted_video_track_source",
+    "../api/video:video_frame",
     "../media:rtc_audio_video",
+    "../modules/video_capture:video_capture_internal_impl",
+    "../modules/video_capture:video_capture_module",
     "../rtc_base:ssl_adapter",
     "../rtc_base:threading",
   ]

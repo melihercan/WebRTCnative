@@ -229,7 +229,7 @@ Wraps `CreatePeerConnectionFactory` with the builtin audio and video encoder and
 Note that on Windows the builtin video factory means **VP8, VP9 and AV1 only** — there is no H.264
 in a standalone build. See [Platform layers](Platform-layers).
 
-### Devices
+### Devices — **video implemented, audio deferred**
 
 ```c
 rtc_status rtc_video_device_count(rtc_factory* f, int32_t* out_count);
@@ -240,15 +240,24 @@ rtc_status rtc_audio_device_info(rtc_factory* f, int32_t index,
                                  char** out_name, char** out_id);
 ```
 
-Backed by `modules/video_capture` (DirectShow) and `modules/audio_device` (WASAPI), both of which
-are present in `webrtc.dll` on Windows. Both output strings are caller-owned.
+Video is backed by `modules/video_capture` (DirectShow on Windows). Output strings are
+caller-owned; an out-of-range index returns `RTC_ERR_NOT_FOUND`.
 
-### Tracks
+**The audio pair returns `RTC_ERR_UNSUPPORTED` for now.** Unlike video there is no free-standing
+enumerator: listing audio devices needs a live `AudioDeviceModule`, and `rtc_factory_create` passes
+null so the peer connection factory builds its own internally, out of reach. Getting one means
+creating it here — on Windows that is `CreateWindowsCoreAudioAudioDeviceModule`, which wants an
+`Environment` and a COM MTA thread — and handing the same instance to the factory. That changes how
+the factory is constructed, so it is its own slice. The exports exist and return a documented
+status, which beats a missing entry point.
+
+### Tracks — **implemented**
 
 ```c
 rtc_status rtc_audio_track_create(rtc_factory* f, const char* label,
                                   rtc_media_track** out_track);
 rtc_status rtc_video_track_create(rtc_factory* f, const char* device_id,
+                                  const char* label,
                                   int32_t width, int32_t height, int32_t fps,
                                   rtc_media_track** out_track);
 rtc_status rtc_media_track_set_enabled(rtc_media_track* t, int32_t enabled);
@@ -259,6 +268,15 @@ void       rtc_media_track_release(rtc_media_track* t);
 This is `getUserMedia` reduced to its parts: enumerate, then create a track from a chosen device.
 The constraint negotiation `WebRTCme.Api` exposes is resolved on the C# side, which then asks for
 concrete numbers.
+
+`label` becomes the track id and must be SDP-safe. It exists because the first implementation
+passed the device id and produced a track whose id was a Windows device path — backslashes, braces
+and all — headed for the `msid` attribute.
+
+Video capture has no ready-made source upstream: `modules/video_capture` produces frames through a
+`VideoSinkInterface` while a track needs a `VideoTrackSourceInterface`, so the shim carries a small
+`CameraSource` bridging the two through `AdaptedVideoTrackSource`. The camera opens when the track
+is created and closes when the last reference to it goes away.
 
 ### Peer connection
 

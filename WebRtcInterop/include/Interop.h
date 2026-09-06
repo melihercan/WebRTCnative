@@ -228,8 +228,12 @@ RTC_API rtc_status RTC_CALL rtc_audio_track_create(rtc_factory* factory,
                                                    const char* label,
                                                    rtc_media_track** out_track);
 
+/* label becomes the track id, so keep it SDP-safe. Do not pass the device id:
+ * a Windows device path contains backslashes and braces and would end up in
+ * the msid attribute. */
 RTC_API rtc_status RTC_CALL rtc_video_track_create(rtc_factory* factory,
                                                    const char* device_id,
+                                                   const char* label,
                                                    int32_t width,
                                                    int32_t height,
                                                    int32_t fps,
