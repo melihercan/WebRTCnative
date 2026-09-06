@@ -18,7 +18,38 @@ stated, against the compiled Windows output — not from documentation.
 | 2 | Native media I/O — microphone, camera, screen capture | `modules/` |
 | 1 | Core engine — transport, RTP, bandwidth estimation, software codecs, APM | `api/`, `pc/`, `call/`, `media/` |
 
-Which tiers each platform receives:
+Which stack each platform actually receives:
+
+```mermaid
+flowchart TB
+    subgraph MOBILE["📱 Android · iOS"]
+        direction TB
+        M3["<b>Tier 3</b> — sdk/android, framework_objc<br/>hardware codecs · camera · renderer · bindings"]
+        M1["<b>Tier 1</b> — core engine"]
+        M3 --- M1
+    end
+    subgraph DESK["🖥 Windows · Linux"]
+        direction TB
+        D2["<b>Tier 2</b> — modules/<br/>audio · camera · screen capture"]
+        D1["<b>Tier 1</b> — core engine"]
+        D2 --- D1
+    end
+    subgraph MAC["🍎 macOS, as we build it"]
+        direction TB
+        C2["<b>Tier 2</b> — modules/<br/>audio · screen capture · <b>no camera</b>"]
+        C1["<b>Tier 1</b> — core engine"]
+        C2 --- C1
+    end
+    subgraph WEB["🌐 Web"]
+        direction TB
+        W3["<b>Tier 3</b> — the browser<br/>Chromium //media · WebKit · Gecko"]
+        W1["<b>Tier 1</b> — core engine"]
+        W3 --- W1
+    end
+```
+
+Mobile and the Web sit on tier 3; Windows and Linux sit on tier 2; macOS sits on an incomplete
+tier 2 while its tier 3 goes unbuilt. In table form:
 
 | Tier | Android | iOS | macOS | Windows | Linux | Web |
 |---|---|---|---|---|---|---|
