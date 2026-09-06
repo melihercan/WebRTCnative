@@ -67,6 +67,8 @@ rtc_shared_library("WebRtcInterop") {
     "../api/video_codecs:builtin_video_decoder_factory",
     "../api/video_codecs:builtin_video_encoder_factory",
     "../api:media_stream_interface",
+    "../api/audio:create_audio_device_module",
+    "../api/environment:environment_factory",
     "../api:rtc_error",
     "../api/video:adapted_video_track_source",
     "../api/video:video_frame",

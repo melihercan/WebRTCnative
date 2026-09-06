@@ -92,6 +92,13 @@ typedef int32_t rtc_media_kind;
 #define RTC_MEDIA_KIND_AUDIO 0
 #define RTC_MEDIA_KIND_VIDEO 1
 
+/* W3C enumerateDevices separates "audioinput" from "audiooutput", so the
+ * audio enumeration functions take which one is wanted. */
+typedef int32_t rtc_audio_device_kind;
+
+#define RTC_AUDIO_DEVICE_RECORDING 0 /* microphones  */
+#define RTC_AUDIO_DEVICE_PLAYOUT   1 /* speakers     */
+
 /* -------------------------------------------------------------------------
  *  Structures
  * ---------------------------------------------------------------------- */
@@ -209,9 +216,11 @@ RTC_API rtc_status RTC_CALL rtc_video_device_info(rtc_factory* factory,
                                                   char** out_id);
 
 RTC_API rtc_status RTC_CALL rtc_audio_device_count(rtc_factory* factory,
+                                                   rtc_audio_device_kind kind,
                                                    int32_t* out_count);
 
 RTC_API rtc_status RTC_CALL rtc_audio_device_info(rtc_factory* factory,
+                                                  rtc_audio_device_kind kind,
                                                   int32_t index,
                                                   char** out_name,
                                                   char** out_id);

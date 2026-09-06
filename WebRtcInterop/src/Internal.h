@@ -11,6 +11,7 @@
 #include <mutex>
 
 #include "Interop.h"
+#include "api/audio/audio_device.h"
 #include "api/media_stream_interface.h"
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
@@ -58,6 +59,11 @@ class FrameSink;
 
 struct rtc_factory {
   webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> ptr;
+  /* The same instance the factory was built with, kept so device enumeration
+   * reports the devices the engine will actually use. Null if the platform
+   * refused to give us one, in which case the factory built its own and
+   * enumeration reports RTC_ERR_INTERNAL. */
+  webrtc::scoped_refptr<webrtc::AudioDeviceModule> adm;
 };
 
 struct rtc_media_track {

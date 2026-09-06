@@ -27,10 +27,13 @@
 #include <new>
 #include <string>
 
+#include "api/audio/create_audio_device_module.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/audio_options.h"
 #include "api/create_peerconnection_factory.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
 #include "api/media_stream_interface.h"
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
@@ -230,13 +233,31 @@ RTC_API rtc_status RTC_CALL rtc_factory_create(rtc_factory** out_factory) {
     return RTC_ERR_INVALID_STATE;
   }
 
-  /* Null adm, mixer and audio processing mean "build the platform defaults":
-   * on Windows that is the WASAPI audio device and the software APM. */
+  /* The audio device module is created here rather than left to the factory,
+   * so device enumeration can report the devices the engine actually uses.
+   * It has thread affinity to the worker thread, so it is built there and
+   * every later call hops back. A machine with no usable audio device is not
+   * a fatal error: the factory falls back to building its own, and
+   * enumeration reports RTC_ERR_INTERNAL. */
+  webrtc::scoped_refptr<webrtc::AudioDeviceModule> adm =
+      g_runtime->worker_thread->BlockingCall(
+          []() -> webrtc::scoped_refptr<webrtc::AudioDeviceModule> {
+            webrtc::Environment env = webrtc::CreateEnvironment();
+            webrtc::scoped_refptr<webrtc::AudioDeviceModule> module =
+                webrtc::CreateAudioDeviceModule(
+                    env, webrtc::AudioDeviceModule::kPlatformDefaultAudio);
+            if (module == nullptr || module->Init() != 0) {
+              return nullptr;
+            }
+            return module;
+          });
+
+  /* Null mixer and audio processing still mean "build the platform defaults". */
   webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory =
       webrtc::CreatePeerConnectionFactory(
           g_runtime->network_thread.get(), g_runtime->worker_thread.get(),
           g_runtime->signaling_thread.get(),
-          /*default_adm=*/nullptr, webrtc::CreateBuiltinAudioEncoderFactory(),
+          adm, webrtc::CreateBuiltinAudioEncoderFactory(),
           webrtc::CreateBuiltinAudioDecoderFactory(),
           webrtc::CreateBuiltinVideoEncoderFactory(),
           webrtc::CreateBuiltinVideoDecoderFactory(),
@@ -251,6 +272,7 @@ RTC_API rtc_status RTC_CALL rtc_factory_create(rtc_factory** out_factory) {
     return RTC_ERR_INTERNAL;
   }
   handle->ptr = std::move(factory);
+  handle->adm = std::move(adm);
   *out_factory = handle;
   return RTC_OK;
 }
@@ -324,42 +346,93 @@ RTC_API rtc_status RTC_CALL rtc_video_device_info(rtc_factory* factory,
   return RTC_OK;
 }
 
-/*
- *  Audio device enumeration is not implemented yet.
- *
- *  Unlike video, there is no free-standing enumerator: listing devices needs a
- *  live AudioDeviceModule, and rtc_factory_create currently passes null so the
- *  peer connection factory builds its own internally, out of reach. Getting
- *  one here means creating it ourselves — on Windows that is
- *  CreateWindowsCoreAudioAudioDeviceModule, which requires an Environment and
- *  a COM MTA thread — then passing the same instance to the factory.
- *
- *  That is a real change to how the factory is constructed, so it is its own
- *  slice rather than something to bolt on here. The exports exist and return a
- *  documented status, which is friendlier to the managed side than a missing
- *  entry point.
- */
-
 RTC_API rtc_status RTC_CALL rtc_audio_device_count(rtc_factory* factory,
+                                                   rtc_audio_device_kind kind,
                                                    int32_t* out_count) {
-  if (factory == nullptr || out_count == nullptr) {
+  if (factory == nullptr || out_count == nullptr ||
+      (kind != RTC_AUDIO_DEVICE_RECORDING && kind != RTC_AUDIO_DEVICE_PLAYOUT)) {
     return RTC_ERR_INVALID_ARG;
   }
   *out_count = 0;
-  return RTC_ERR_UNSUPPORTED;
+  if (factory->adm == nullptr) {
+    return RTC_ERR_INTERNAL;
+  }
+
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_runtime == nullptr) {
+    return RTC_ERR_INVALID_STATE;
+  }
+
+  /* The module has thread affinity to the worker thread. */
+  webrtc::AudioDeviceModule* adm = factory->adm.get();
+  const int16_t count = g_runtime->worker_thread->BlockingCall([adm, kind] {
+    return kind == RTC_AUDIO_DEVICE_RECORDING ? adm->RecordingDevices()
+                                              : adm->PlayoutDevices();
+  });
+  if (count < 0) {
+    return RTC_ERR_INTERNAL;
+  }
+  *out_count = count;
+  return RTC_OK;
 }
 
 RTC_API rtc_status RTC_CALL rtc_audio_device_info(rtc_factory* factory,
+                                                  rtc_audio_device_kind kind,
                                                   int32_t index,
                                                   char** out_name,
                                                   char** out_id) {
   if (factory == nullptr || out_name == nullptr || out_id == nullptr ||
-      index < 0) {
+      index < 0 ||
+      (kind != RTC_AUDIO_DEVICE_RECORDING && kind != RTC_AUDIO_DEVICE_PLAYOUT)) {
     return RTC_ERR_INVALID_ARG;
   }
   *out_name = nullptr;
   *out_id = nullptr;
-  return RTC_ERR_UNSUPPORTED;
+  if (factory->adm == nullptr) {
+    return RTC_ERR_INTERNAL;
+  }
+
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_runtime == nullptr) {
+    return RTC_ERR_INVALID_STATE;
+  }
+
+  char name[webrtc::kAdmMaxDeviceNameSize] = {0};
+  char guid[webrtc::kAdmMaxGuidSize] = {0};
+  webrtc::AudioDeviceModule* adm = factory->adm.get();
+  const int32_t result =
+      g_runtime->worker_thread->BlockingCall([adm, kind, index, &name, &guid] {
+        const uint16_t i = static_cast<uint16_t>(index);
+        const int16_t count = kind == RTC_AUDIO_DEVICE_RECORDING
+                                  ? adm->RecordingDevices()
+                                  : adm->PlayoutDevices();
+        if (count < 0 || index >= count) {
+          return 1; /* out of range, distinguished below */
+        }
+        return kind == RTC_AUDIO_DEVICE_RECORDING
+                   ? adm->RecordingDeviceName(i, name, guid)
+                   : adm->PlayoutDeviceName(i, name, guid);
+      });
+  if (result == 1) {
+    return RTC_ERR_NOT_FOUND;
+  }
+  if (result != 0) {
+    return RTC_ERR_INTERNAL;
+  }
+
+  /* Some drivers report an empty guid; fall back to the name so the caller
+   * always has something to select the device with. */
+  char* name_copy = DuplicateString(name);
+  char* id_copy = DuplicateString(guid[0] != 0 ? guid : name);
+  if (name_copy == nullptr || id_copy == nullptr) {
+    std::free(name_copy);
+    std::free(id_copy);
+    return RTC_ERR_INTERNAL;
+  }
+
+  *out_name = name_copy;
+  *out_id = id_copy;
+  return RTC_OK;
 }
 
 /* -------------------------------------------------------------------------
