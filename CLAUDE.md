@@ -173,6 +173,26 @@ macOS), PowerShell `(Get-Content …).replace(…)` / `-notmatch`.
   xcframework with no simulator or Catalyst slice. The framework is zipped before upload because
   `upload-artifact` does not preserve the symlinks an xcframework needs.
 
+## What is actually in each artifact
+
+The artifacts are not equivalent slices of the same library. WebRTC is a shared core, a native
+media layer aimed at desktop, and an integration layer (`sdk/`) that exists only for Android, iOS
+and macOS. Mobile builds the SDK target and gets hardware codecs, capture and rendering; desktop
+builds the raw `webrtc` C++ target and gets none of those. `wiki/Platform-layers.md` has the full
+matrix and the evidence.
+
+Three consequences that will otherwise be rediscovered by debugging a null factory at run time:
+
+- **Desktop has no H.264.** `rtc_use_h264` falls to `proprietary_codecs` outside a Chromium build,
+  which is false, so OpenH264 is never compiled (verified: 0 objects). The DLL still exports 26
+  H.264 symbols for SDP/RTP, but `h264.cc:174` is `return nullptr`. Browsers get H.264 from the
+  same tree via `media_use_openh264` — one flag apart.
+- **macOS has no camera capture.** `modules/video_capture/` has `linux/` and `windows/` only.
+  Upstream's `sdk:mac_framework_objc` would supply it, plus Metal rendering and VideoToolbox
+  H.264; we build the `webrtc` target instead. This is the one gap that is ours, not upstream's.
+- **Screen capture is desktop-only.** `rtc_desktop_capture_supported` excludes mobile by
+  definition.
+
 ## Working in this repo
 
 - **You cannot run these builds locally.** A WebRTC checkout is ~30 GB and needs `depot_tools`.

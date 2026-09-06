@@ -14,6 +14,10 @@ each artifact to the project that consumes it.
 | `WebRTC.xcframework` | `WebRTCme.Bindings/Maui/WebRTCme.Bindings.Maui.iOS` | ObjC binding source |
 | `webrtc.lib`, `libwebrtc.a` | *(none)* | for linking native C/C++ against WebRTC |
 
+[Platform layers](Platform-layers) records what each of these artifacts actually contains — the
+desktop ones are missing H.264 entirely, and the macOS one has no camera capture. Read it before
+assuming a capability is present.
+
 The static libraries are not used by WebRTCme. They exist for anyone building a native component
 that links WebRTC directly, and because the static build is the sanity check that the source tree
 compiles at all before the shared-library patch enters the picture.

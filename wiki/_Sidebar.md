@@ -8,6 +8,7 @@
 - [Consuming the artifacts](Consuming-the-artifacts)
 
 **Reference**
+- [Platform layers](Platform-layers)
 - [Workflow reference](Workflow-reference)
 - [Shared library patch](Shared-library-patch)
 - [Repository layout](Repository-layout)
