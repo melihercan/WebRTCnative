@@ -67,9 +67,11 @@ dangling pointer.
 
 `CallCreatePeerConnectionFactory` is commented out entirely. That is the real problem this shim has
 to solve: WebRTC hands back `scoped_refptr` and `unique_ptr`, and neither survives a C boundary
-without an explicit ownership convention. [webrtc-sdk/libwebrtc](Prebuilt-distributions) is the
-project this was started from and has since solved exactly that, so compare against it before
-writing more.
+without an explicit ownership convention.
+
+[Interop ABI](Interop-ABI) settles that convention and specifies the first slice. The 2023 code
+predates it and does not follow it — treat the directory as a build harness that works, and the ABI
+page as what to write into it.
 
 This work dates from 2023 and predates the current workflows. Its original standalone repository
 was folded in here; the full history is preserved on the `archive/webrtcinterop-2023` branch.

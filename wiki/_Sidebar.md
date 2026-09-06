@@ -7,6 +7,9 @@
 - [Branch selection](Branch-selection)
 - [Consuming the artifacts](Consuming-the-artifacts)
 
+**Building on it**
+- [Interop ABI](Interop-ABI)
+
 **Reference**
 - [Platform layers](Platform-layers)
 - [Prebuilt distributions](Prebuilt-distributions)

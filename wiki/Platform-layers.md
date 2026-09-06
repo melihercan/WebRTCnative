@@ -163,8 +163,8 @@ Every other column reaches tier 3 somehow — Android and the Apple platforms th
 through the browser. Windows and Linux have no `sdk/` target upstream and no host to supply one, so
 they stop at the core plus native media I/O.
 
-That is what a Windows SDK for WebRTCme would be building: the missing tier 3. See
-[Prebuilt distributions](Prebuilt-distributions) for the C ABI wrappers that solve the same problem.
+That is what a Windows SDK for WebRTCme would be building: the missing tier 3. [Interop ABI](Interop-ABI)
+is the contract for it.
 
 ### Screen capture runs the other way
 
