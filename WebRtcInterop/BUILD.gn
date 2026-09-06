@@ -51,6 +51,7 @@ rtc_shared_library("WebRtcInterop") {
   sources = [
     "include/Interop.h",
     "src/Internal.h",
+    "src/FrameSink.cc",
     "src/Interop.cc",
     "src/PeerConnection.cc",
   ]

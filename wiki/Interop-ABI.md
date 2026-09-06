@@ -209,8 +209,12 @@ caller, a C++ caller, or read as documentation without a toolchain.
 ## Slice one
 
 The smallest surface that carries an audio and video call between two Windows peers. Twenty-five
-functions, declared in `WebRtcInterop/include/Interop.h`. Everything else waits until this works
-end to end.
+functions, declared in `WebRtcInterop/include/Interop.h`.
+
+**Twenty-three are implemented**; the two audio enumeration functions return
+`RTC_ERR_UNSUPPORTED` and are explained under Devices. Two tests in `WebRtcInterop/test/` cover the
+rest: `Handshake.c` drives a full offer/answer/ICE exchange between two peer connections, and
+`FrameSink.c` opens a camera and checks the delivered frames.
 
 ### Library — **implemented**
 
@@ -351,7 +355,7 @@ These four are asynchronous in WebRTC and stay asynchronous here — the return 
 whether the request was *accepted*. The C# side turns each into a `TaskCompletionSource` so
 `WebRTCme.Api` can present the `Task` shape it already has.
 
-### Video frames
+### Video frames — **implemented**
 
 ```c
 typedef struct {
@@ -369,12 +373,22 @@ rtc_status rtc_video_track_add_sink(rtc_media_track* t,
 rtc_status rtc_video_track_remove_sink(rtc_media_track* t);
 ```
 
-**The riskiest part of slice one.** Frames arrive on a WebRTC thread at 30 fps and the buffers are
-valid only for the duration of the callback, so the handler must copy or convert immediately.
-Anything slower than the frame interval will drop frames or stall decoding.
+Frames arrive on a WebRTC capture or decode thread and the planes belong to WebRTC for exactly the
+duration of the callback, so the handler must copy or convert and return. Anything slower than the
+frame interval drops frames or stalls decoding.
 
-Included because without it there is nothing to look at, and "a working call" cannot be
-demonstrated. Expect this to be the piece that needs revisiting for performance.
+The shim calls `ToI420()` on the incoming buffer: a no-op when the frame already is I420, which is
+the common case for a camera, and a conversion otherwise. The returned reference is held for the
+callback, which is what keeps the planes alive.
+
+One sink per track. Adding a second returns `RTC_ERR_INVALID_STATE` rather than silently replacing
+the first and leaking its registration, and adding one to an audio track returns
+`RTC_ERR_INVALID_ARG`. `RemoveSink` is synchronous, so once `rtc_video_track_remove_sink` returns
+no further callback can be in flight. Releasing a track that still has a sink unregisters it in the
+destructor rather than leaving WebRTC holding a pointer into freed memory.
+
+Measured against a real camera: 85 frames in 2.80 s — 30.4 fps against a requested 30 — at
+640x480 with strides y=640, u=320, v=320, no null planes and no blank rows.
 
 ## Deliberately out of slice one
 

@@ -45,6 +45,7 @@ extern std::unique_ptr<Runtime> g_runtime;
 char* DuplicateString(const char* value);
 
 class InteropObserver;
+class FrameSink;
 
 }  // namespace webrtc_interop
 
@@ -60,11 +61,17 @@ struct rtc_factory {
 };
 
 struct rtc_media_track {
+  rtc_media_track();
+  ~rtc_media_track();
+
   webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track;
   /* Audio tracks do not own their source, so hold a reference here to keep it
    * alive for as long as the caller holds the track. Video tracks do own
    * theirs, and this stays null. */
   webrtc::scoped_refptr<webrtc::AudioSourceInterface> audio_source;
+  /* Set while a frame sink is registered. Unregistered by the destructor, so
+   * releasing a track with a live sink cannot leave a dangling registration. */
+  std::unique_ptr<webrtc_interop::FrameSink> sink;
 };
 
 struct rtc_peer_connection {
