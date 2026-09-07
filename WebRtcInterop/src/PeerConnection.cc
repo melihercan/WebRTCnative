@@ -22,6 +22,8 @@
 #include "api/rtp_transceiver_interface.h"
 #include "api/set_local_description_observer_interface.h"
 #include "api/set_remote_description_observer_interface.h"
+#include "api/stats/rtc_stats_collector_callback.h"
+#include "api/stats/rtc_stats_report.h"
 
 namespace webrtc_interop {
 namespace {
@@ -98,6 +100,48 @@ class CreateSdpObserver : public webrtc::CreateSessionDescriptionObserver {
 
  private:
   const rtc_on_sdp_success_fn on_success_;
+  const rtc_on_failure_fn on_failure_;
+  void* const user_data_;
+};
+
+/* One per outstanding get-stats. Refcounted by WebRTC, which drops the last
+ * reference once the report has been delivered. */
+class StatsCollector : public webrtc::RTCStatsCollectorCallback {
+ public:
+  StatsCollector(rtc_on_stats_success_fn on_success,
+                 rtc_on_failure_fn on_failure,
+                 void* user_data)
+      : on_success_(on_success),
+        on_failure_(on_failure),
+        user_data_(user_data) {}
+
+  void OnStatsDelivered(
+      const webrtc::scoped_refptr<const webrtc::RTCStatsReport>& report)
+      override {
+    if (report == nullptr) {
+      if (on_failure_ != nullptr) {
+        on_failure_(user_data_, "no statistics report was produced");
+      }
+      return;
+    }
+    /* ToJson allocates; the string lives for the duration of the call and
+     * the caller copies what it wants, as with the SDP callbacks.
+     *
+     * An empty report serialises to an empty string rather than to "[]", so
+     * substitute one. The caller should not have to special-case a payload
+     * that is not JSON at all, and a peer connection that has just been
+     * created reports nothing. */
+    std::string json = report->ToJson();
+    if (json.empty()) {
+      json = "[]";
+    }
+    if (on_success_ != nullptr) {
+      on_success_(user_data_, json.c_str());
+    }
+  }
+
+ private:
+  const rtc_on_stats_success_fn on_success_;
   const rtc_on_failure_fn on_failure_;
   void* const user_data_;
 };
@@ -386,6 +430,30 @@ rtc_peer_connection_create_answer(rtc_peer_connection* pc,
   pc->pc->CreateAnswer(
       observer.get(),
       webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
+  return RTC_OK;
+}
+
+/* -------------------------------------------------------------------------
+ *  Statistics
+ * ---------------------------------------------------------------------- */
+
+RTC_API rtc_status RTC_CALL
+rtc_peer_connection_get_stats(rtc_peer_connection* pc,
+                              rtc_on_stats_success_fn on_success,
+                              rtc_on_failure_fn on_failure,
+                              void* user_data) {
+  if (pc == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  /* Nothing would ever call back, so say so rather than starting a collection
+   * whose result is discarded. */
+  if (on_success == nullptr && on_failure == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  webrtc::scoped_refptr<webrtc_interop::StatsCollector> collector(
+      new webrtc::RefCountedObject<webrtc_interop::StatsCollector>(
+          on_success, on_failure, user_data));
+  pc->pc->GetStats(collector.get());
   return RTC_OK;
 }
 

@@ -206,6 +206,11 @@ typedef void(RTC_CALL* rtc_on_sdp_success_fn)(void* user_data,
 
 typedef void(RTC_CALL* rtc_on_void_success_fn)(void* user_data);
 
+/* The report as JSON, borrowed for the duration of the call. See
+ * rtc_peer_connection_get_stats for the shape. */
+typedef void(RTC_CALL* rtc_on_stats_success_fn)(void* user_data,
+                                                const char* json);
+
 typedef void(RTC_CALL* rtc_on_failure_fn)(void* user_data, const char* error);
 
 typedef void(RTC_CALL* rtc_on_frame_fn)(void* user_data,
@@ -493,6 +498,37 @@ rtc_data_channel_get_buffered_amount(rtc_data_channel* channel,
 RTC_API rtc_status RTC_CALL rtc_data_channel_close(rtc_data_channel* channel);
 
 RTC_API void RTC_CALL rtc_data_channel_release(rtc_data_channel* channel);
+
+/* -------------------------------------------------------------------------
+ *  Statistics
+ *
+ *  W3C getStats. The report is a heterogeneous bag -- every stats type has a
+ *  different member set, defined by a specification that versions separately
+ *  from this one -- so it crosses as JSON rather than as a walk over handles.
+ *  Modelling it structurally would mean an attribute type enum and an
+ *  accessor per type, and would still need revisiting whenever WebRTC adds a
+ *  member. WebRTC already serialises the report itself, so this is a copy
+ *  rather than a translation.
+ * ---------------------------------------------------------------------- */
+
+/* Asynchronous, like the negotiation calls: the return value reports only
+ * that collection was started, and the report arrives on on_success on the
+ * signalling thread.
+ *
+ * The JSON is an array of stats objects, each carrying "id", "type" and
+ * "timestamp" alongside the members of its type. Timestamps are
+ * MICROSECONDS, as WebRTC reports them, not the milliseconds W3C
+ * DOMHighResTimeStamp uses -- converting is left to the caller, which knows
+ * which of the two it wants.
+ *
+ * on_failure is raised only if the report cannot be serialised; WebRTC's own
+ * collection has no failure path, and a closed peer connection yields an
+ * empty report rather than an error. */
+RTC_API rtc_status RTC_CALL
+rtc_peer_connection_get_stats(rtc_peer_connection* pc,
+                              rtc_on_stats_success_fn on_success,
+                              rtc_on_failure_fn on_failure,
+                              void* user_data);
 
 /* -------------------------------------------------------------------------
  *  Video frames

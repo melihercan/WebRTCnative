@@ -537,10 +537,55 @@ WinRT initialised on the capture thread, which is a larger contract than this ow
 conversion from BGRA to I420 is ours rather than a capture module's, so a stride or plane mistake
 would give a sheared or grey image that every status code would still call success.
 
+## Statistics — **implemented**
+
+```c
+typedef void (*rtc_on_stats_success_fn)(void* user_data, const char* json);
+
+rtc_status rtc_peer_connection_get_stats(rtc_peer_connection* pc,
+                                         rtc_on_stats_success_fn on_success,
+                                         rtc_on_failure_fn on_failure,
+                                         void* user_data);
+```
+
+Asynchronous, like negotiation: the return value says only that collection started, and the report
+arrives on the signalling thread.
+
+**The report crosses as JSON, and that is a deliberate choice rather than a shortcut.** A stats
+report is a heterogeneous bag — every type carries a different member set, defined by the
+[WebRTC Statistics](https://w3c.github.io/webrtc-stats/) specification, which versions separately
+from `webrtc-pc` and gains and loses members between milestones. Modelling it structurally would
+mean a report handle, a stats handle, an attribute type enum and an accessor per type: dozens of
+exports, all of which would need revisiting whenever WebRTC adds a member. WebRTC already
+serialises the report itself through `RTCStatsReport::ToJson`, so this is a copy rather than a
+translation, and the managed side already parses JSON for the Blazor binding.
+
+Two details that will otherwise be found by debugging:
+
+- **Timestamps are microseconds**, as WebRTC reports them, not the milliseconds a W3C
+  `DOMHighResTimeStamp` uses. The conversion is left to the caller because the caller knows which
+  of the two it wants; `WebRTCme` divides by 1000 on Android and iOS for the same reason.
+- **`on_failure` is nearly dead.** WebRTC's collection has no failure path, and a closed peer
+  connection yields an empty report rather than an error, so it is raised only if no report
+  arrives at all. It exists for symmetry with the negotiation calls.
+- **An empty report serialises to an empty string**, not to `[]`, so the shim substitutes one.
+  A caller should never receive a payload that is not JSON.
+
+Confirm the serialised shape against the milestone actually being built before trusting the
+parser — `ToJson` is not part of the ABI this repository controls. `test/Stats.c` prints the first
+400 characters for exactly that reason.
+
+`test/Stats.c` asserts the shape rather than the numbers: that the payload is an array, that every
+entry carries `id`, `type` and `timestamp`, and that a connection with media flowing produces
+`outbound-rtp` and `candidate-pair` entries. The managed parser keys on `id` and reads the other
+two off every entry, so a missing one is a real break that an empty C# dictionary would otherwise
+be the first sign of.
+
 ## Still out of scope
 
-`getStats`, transceivers and `getUserMedia` constraint negotiation, simulcast, insertable
-streams, DTMF, ICE restart, receivers, audio device *selection*
+Transceivers and `getUserMedia` constraint negotiation, simulcast, insertable
+streams, DTMF, ICE restart, receivers, per-sender and per-receiver `getStats`, audio device
+*selection*
 (enumeration works; `audio_track_create` takes no device id), and an `on_ice_gathering_state`
 callback — without which a caller can observe gathering starting but never completing. Each is
 additive and none changes the conventions above.

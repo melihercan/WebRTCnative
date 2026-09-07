@@ -74,6 +74,9 @@ rtc_shared_library("WebRtcInterop") {
     "../api/audio:create_audio_device_module",
     "../api/environment:environment_factory",
     "../api:rtc_error",
+    # PeerConnection.cc includes the stats headers directly, so depend on them
+    # rather than leaning on peer_connection_interface to pull them in.
+    "../api:rtc_stats_api",
     "../api/video:adapted_video_track_source",
     "../api/video:video_frame",
     "../media:rtc_audio_video",
