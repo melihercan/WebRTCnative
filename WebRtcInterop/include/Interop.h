@@ -96,6 +96,12 @@ typedef int32_t rtc_data_channel_state;
 #define RTC_DATA_CHANNEL_STATE_CLOSING    2
 #define RTC_DATA_CHANNEL_STATE_CLOSED     3
 
+/* getDisplayMedia separates a whole screen from a single window. */
+typedef int32_t rtc_desktop_source_kind;
+
+#define RTC_DESKTOP_SOURCE_SCREEN 0
+#define RTC_DESKTOP_SOURCE_WINDOW 1
+
 typedef int32_t rtc_media_kind;
 
 #define RTC_MEDIA_KIND_AUDIO 0
@@ -308,6 +314,40 @@ RTC_API rtc_status RTC_CALL rtc_media_track_get_id(rtc_media_track* track,
                                                    char** out_id);
 
 RTC_API void RTC_CALL rtc_media_track_release(rtc_media_track* track);
+
+/* -------------------------------------------------------------------------
+ *  Desktop capture
+ *
+ *  getDisplayMedia, taken apart the same way getUserMedia was: enumerate, then
+ *  create a track from a chosen source. Enumeration takes no factory because a
+ *  capturer needs none.
+ *
+ *  Windows uses the GDI capturers. The DirectX and Windows Graphics Capture
+ *  paths are faster but require COM or WinRT to be initialised on the capture
+ *  thread, which is a larger contract than this owes its caller.
+ * ---------------------------------------------------------------------- */
+
+RTC_API rtc_status RTC_CALL
+rtc_desktop_source_count(rtc_desktop_source_kind kind, int32_t* out_count);
+
+/* out_title is caller-owned; free with rtc_string_free. Screens often have no
+ * title of their own, in which case a positional name is returned. out_id is
+ * what rtc_desktop_track_create takes -- an index is not stable across calls. */
+RTC_API rtc_status RTC_CALL
+rtc_desktop_source_info(rtc_desktop_source_kind kind,
+                        int32_t index,
+                        char** out_title,
+                        int64_t* out_id);
+
+/* Capture starts before this returns, so an unusable source is reported here
+ * rather than as a track that never produces a frame. */
+RTC_API rtc_status RTC_CALL
+rtc_desktop_track_create(rtc_factory* factory,
+                         rtc_desktop_source_kind kind,
+                         int64_t source_id,
+                         const char* label,
+                         int32_t max_fps,
+                         rtc_media_track** out_track);
 
 /* -------------------------------------------------------------------------
  *  Peer connection

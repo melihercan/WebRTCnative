@@ -214,11 +214,12 @@ The smallest surface that carries an audio and video call between two Windows pe
 functions, declared in `WebRtcInterop/include/Interop.h`.
 
 **All twenty-five are implemented**, and data channels have since been added on top — see below.
-Five tests in `WebRtcInterop/test/` cover the surface: `Handshake.c` drives a full offer/answer/ICE
+Six tests in `WebRtcInterop/test/` cover the surface: `Handshake.c` drives a full offer/answer/ICE
 exchange between two peer connections, `FrameSink.c` opens a camera and checks the delivered
 frames, `Devices.c` enumerates every device kind and exercises the error paths, and
 `DataChannel.c` opens a channel across a handshake and sends both ways, and `Sender.c`
-replaces and removes a track on a live sender.
+replaces and removes a track on a live sender, and
+`DesktopCapture.c` enumerates shareable sources and checks captured frames.
 
 ### Library — **implemented**
 
@@ -489,10 +490,49 @@ exactly one owner and one release.
 and back; a video track refused on an audio sender; the connection still connected and *no*
 renegotiation raised by any of it; removal, second removal, the null-argument paths, and release.
 
+## Desktop capture — **implemented**
+
+`getDisplayMedia`, taken apart the same way `getUserMedia` was: enumerate, then create a track
+from a chosen source.
+
+```c
+rtc_desktop_source_count(kind, &count);              /* screen or window     */
+rtc_desktop_source_info(kind, index, &title, &id);   /* title caller-frees   */
+rtc_desktop_track_create(factory, kind, id, label, max_fps, &track);
+```
+
+WebRTC ships `modules/desktop_capture` but nothing that turns a `DesktopCapturer` into a video
+track, so the shim supplies that bridge — the same gap `CameraSource` fills for the camera.
+
+**The source is identified by id, not index.** The list is rebuilt on every call and windows come
+and go, so an index taken from one call means nothing in the next.
+
+**A `DesktopCapturer` must be created, used and destroyed on one thread**, and that thread cannot
+be the caller's, because capture has to keep running after `rtc_desktop_track_create` returns. So
+the source owns a capture thread and does all three there. Creation waits for the capturer to come
+up, which is what lets a bad source id fail the create call rather than yield a track that never
+produces a frame.
+
+**The loop is paced to a deadline, not by sleeping after each capture.** Capturing a 4K screen
+through GDI costs tens of milliseconds; adding that to the interval halved the delivered rate.
+Measured on a 3840x2160 screen: 8.5 fps against a requested 15 before the fix, 15.4 after.
+
+**`is_screencast()` returns true**, which shifts the encoder's degradation preference towards
+holding resolution rather than frame rate. Screen content is read, not watched — text staying
+legible when the link tightens is the whole difference between a useful shared screen and a
+useless one.
+
+Windows uses the GDI capturers. DirectX and Windows Graphics Capture are faster but need COM or
+WinRT initialised on the capture thread, which is a larger contract than this owes its caller.
+
+`test/DesktopCapture.c` enumerates both kinds, captures a screen, and checks the frames — the
+conversion from BGRA to I420 is ours rather than a capture module's, so a stride or plane mistake
+would give a sheared or grey image that every status code would still call success.
+
 ## Still out of scope
 
-`getStats`, transceivers and `getUserMedia` constraint negotiation, simulcast, screen capture via
-`rtc_desktop_capturer`, insertable streams, DTMF, ICE restart, receivers, audio device *selection*
+`getStats`, transceivers and `getUserMedia` constraint negotiation, simulcast, insertable
+streams, DTMF, ICE restart, receivers, audio device *selection*
 (enumeration works; `audio_track_create` takes no device id), and an `on_ice_gathering_state`
 callback — without which a caller can observe gathering starting but never completing. Each is
 additive and none changes the conventions above.

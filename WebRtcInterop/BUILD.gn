@@ -52,6 +52,7 @@ rtc_shared_library("WebRtcInterop") {
     "include/Interop.h",
     "src/Internal.h",
     "src/DataChannel.cc",
+    "src/DesktopCapture.cc",
     "src/FrameSink.cc",
     "src/Interop.cc",
     "src/PeerConnection.cc",
@@ -59,7 +60,8 @@ rtc_shared_library("WebRtcInterop") {
 
   # video_capture_internal_impl is the one that carries the platform backends
   # (DirectShow on Windows, V4L2 on Linux); video_capture_module alone is just
-  # the interface. Desktop capture and libyuv arrive with later slices.
+  # the interface. desktop_capture brings the screen and window capturers, and
+  # libyuv converts their BGRA frames to the I420 the encoders want.
   deps = [
     "../api:create_peerconnection_factory",
     "../api:data_channel_interface",
@@ -75,11 +77,13 @@ rtc_shared_library("WebRtcInterop") {
     "../api/video:adapted_video_track_source",
     "../api/video:video_frame",
     "../media:rtc_audio_video",
+    "../modules/desktop_capture",
     "../modules/video_capture:video_capture_internal_impl",
     "../modules/video_capture:video_capture_module",
     "../rtc_base:copy_on_write_buffer",
     "../rtc_base:ssl_adapter",
     "../rtc_base:threading",
+    "//third_party/libyuv",
   ]
 
   if (is_win) {
