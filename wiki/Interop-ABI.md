@@ -571,9 +571,24 @@ Two details that will otherwise be found by debugging:
 - **An empty report serialises to an empty string**, not to `[]`, so the shim substitutes one.
   A caller should never receive a payload that is not JSON.
 
-Confirm the serialised shape against the milestone actually being built before trusting the
-parser — `ToJson` is not part of the ABI this repository controls. `test/Stats.c` prints the first
-400 characters for exactly that reason.
+The shape below is read off M152 (`branch-heads/7977`), from `api/stats/rtc_stats.cc` and
+`api/stats/attribute.cc`, rather than assumed:
+
+```
+[{"type":"outbound-rtp","id":"OT01A123","timestamp":1738000000000000,"bytesSent":4096,...},...]
+```
+
+`RTCStats::ToJson` writes `type`, `id` and `timestamp` first and always, then every attribute that
+`has_value()`; absent attributes are omitted rather than emitted as null. Strings are quoted,
+vector attributes become JSON arrays, and map attributes — `qualityLimitationDurations` and its
+kind — become nested JSON objects. The payload is valid JSON throughout.
+
+One upstream quirk worth knowing: **64-bit integers are printed through `%.16g` as doubles**, so a
+counter above 2^53 loses precision before it ever reaches the caller. That is WebRTC's choice, made
+because JSON has no integer type, and nothing here can recover it.
+
+`ToJson` is still not part of the ABI this repository controls, so re-check it when the milestone
+moves. `test/Stats.c` prints the first 400 characters for exactly that.
 
 `test/Stats.c` asserts the shape rather than the numbers: that the payload is an array, that every
 entry carries `id`, `type` and `timestamp`, and that a connection with media flowing produces
