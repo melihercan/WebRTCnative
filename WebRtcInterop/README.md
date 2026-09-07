@@ -9,6 +9,7 @@ include/Interop.h      the public ABI — the only file a caller needs
 src/Internal.h         handle definitions, shared between the translation units
 src/Interop.cc         library lifecycle, factory, device enumeration, tracks
 src/PeerConnection.cc  peer connection, observers, negotiation
+src/DataChannel.cc     SCTP data channels
 src/FrameSink.cc       video frame delivery
 test/                  C harnesses driving the built DLL
 ```
@@ -40,6 +41,7 @@ before adding a function; the conventions are not obvious from the header alone.
 | `Handshake.c` | a full offer/answer/ICE exchange between two peer connections |
 | `FrameSink.c` | opens a camera and checks the delivered frames |
 | `Devices.c` | enumerates every device kind and exercises the error paths |
+| `DataChannel.c` | opens a data channel across a handshake and sends both ways |
 
 Build one against the DLL produced by the workflow:
 

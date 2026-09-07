@@ -51,6 +51,7 @@ rtc_shared_library("WebRtcInterop") {
   sources = [
     "include/Interop.h",
     "src/Internal.h",
+    "src/DataChannel.cc",
     "src/FrameSink.cc",
     "src/Interop.cc",
     "src/PeerConnection.cc",
@@ -61,6 +62,7 @@ rtc_shared_library("WebRtcInterop") {
   # the interface. Desktop capture and libyuv arrive with later slices.
   deps = [
     "../api:create_peerconnection_factory",
+    "../api:data_channel_interface",
     "../api:peer_connection_interface",
     "../api/audio_codecs:builtin_audio_decoder_factory",
     "../api/audio_codecs:builtin_audio_encoder_factory",
@@ -75,6 +77,7 @@ rtc_shared_library("WebRtcInterop") {
     "../media:rtc_audio_video",
     "../modules/video_capture:video_capture_internal_impl",
     "../modules/video_capture:video_capture_module",
+    "../rtc_base:copy_on_write_buffer",
     "../rtc_base:ssl_adapter",
     "../rtc_base:threading",
   ]

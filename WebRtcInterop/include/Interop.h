@@ -61,6 +61,7 @@ typedef int32_t rtc_status;
 typedef struct rtc_factory rtc_factory;
 typedef struct rtc_peer_connection rtc_peer_connection;
 typedef struct rtc_media_track rtc_media_track;
+typedef struct rtc_data_channel rtc_data_channel;
 
 /* -------------------------------------------------------------------------
  *  Enumerations
@@ -86,6 +87,13 @@ typedef int32_t rtc_signaling_state;
 #define RTC_SIGNALING_STATE_HAVE_REMOTE_OFFER    3
 #define RTC_SIGNALING_STATE_HAVE_REMOTE_PRANSWER 4
 #define RTC_SIGNALING_STATE_CLOSED               5
+
+typedef int32_t rtc_data_channel_state;
+
+#define RTC_DATA_CHANNEL_STATE_CONNECTING 0
+#define RTC_DATA_CHANNEL_STATE_OPEN       1
+#define RTC_DATA_CHANNEL_STATE_CLOSING    2
+#define RTC_DATA_CHANNEL_STATE_CLOSED     3
 
 typedef int32_t rtc_media_kind;
 
@@ -113,6 +121,18 @@ typedef struct {
   const rtc_ice_server* ice_servers;
   int32_t ice_server_count;
 } rtc_configuration;
+
+/* W3C RTCDataChannelInit. The optional members are int32_t with -1 meaning
+ * "not set" rather than pointers to values: it keeps the struct blittable, and
+ * -1 is a value none of these fields can legitimately take. */
+typedef struct {
+  const char* protocol;         /* nullable                                 */
+  int32_t ordered;              /* 0 or 1; 1 is the W3C default             */
+  int32_t max_packet_life_time; /* milliseconds, or -1 for unset            */
+  int32_t max_retransmits;      /* or -1 for unset                          */
+  int32_t negotiated;           /* 0 or 1; 0 is the W3C default             */
+  int32_t id;                   /* only meaningful when negotiated, else -1 */
+} rtc_data_channel_init;
 
 /* An I420 frame. The planes belong to WebRTC and are valid only for the
  * duration of the rtc_on_frame_fn call. Copy or convert before returning. */
@@ -154,6 +174,25 @@ typedef void(RTC_CALL* rtc_on_track_fn)(void* user_data,
 
 typedef void(RTC_CALL* rtc_on_renegotiation_needed_fn)(void* user_data);
 
+/* A channel the peer opened. Owned by the receiver, like a track. */
+typedef void(RTC_CALL* rtc_on_data_channel_fn)(void* user_data,
+                                               rtc_data_channel* channel);
+
+typedef void(RTC_CALL* rtc_on_data_channel_state_fn)(
+    void* user_data,
+    rtc_data_channel_state state);
+
+/* data is borrowed for the duration of the call. is_binary separates a byte
+ * payload from UTF-8 text: SCTP carries the distinction, and the W3C API
+ * surfaces the two as different message types. */
+typedef void(RTC_CALL* rtc_on_data_channel_message_fn)(void* user_data,
+                                                       const uint8_t* data,
+                                                       int32_t size,
+                                                       int32_t is_binary);
+
+typedef void(RTC_CALL* rtc_on_buffered_amount_change_fn)(void* user_data,
+                                                         uint64_t buffered);
+
 typedef void(RTC_CALL* rtc_on_sdp_success_fn)(void* user_data,
                                               const char* type,
                                               const char* sdp);
@@ -173,7 +212,19 @@ typedef struct {
   rtc_on_signaling_state_fn on_signaling_state;
   rtc_on_track_fn on_track;
   rtc_on_renegotiation_needed_fn on_renegotiation_needed;
+  /* Appended rather than inserted: this struct is passed by address and read
+   * field by field, so a new member at the end leaves the existing ones where
+   * they were. Callers built against the shorter struct still work. */
+  rtc_on_data_channel_fn on_data_channel;
 } rtc_peer_connection_observer;
+
+/* Copied at registration, like the peer connection observer. Null members are
+ * permitted and simply not raised. */
+typedef struct {
+  rtc_on_data_channel_state_fn on_state;
+  rtc_on_data_channel_message_fn on_message;
+  rtc_on_buffered_amount_change_fn on_buffered_amount_change;
+} rtc_data_channel_observer;
 
 /* -------------------------------------------------------------------------
  *  Library
@@ -320,6 +371,56 @@ RTC_API rtc_status RTC_CALL
 rtc_peer_connection_add_track(rtc_peer_connection* pc,
                               rtc_media_track* track,
                               const char* stream_id);
+
+/* -------------------------------------------------------------------------
+ *  Data channels
+ *
+ *  An SCTP channel alongside the media. Creating one before the offer puts an
+ *  m=application section in the SDP; creating one afterwards raises
+ *  on_renegotiation_needed, exactly as the W3C API does.
+ * ---------------------------------------------------------------------- */
+
+/* init may be null, which takes the W3C defaults: ordered, reliable, not
+ * negotiated. */
+RTC_API rtc_status RTC_CALL
+rtc_peer_connection_create_data_channel(rtc_peer_connection* pc,
+                                        const char* label,
+                                        const rtc_data_channel_init* init,
+                                        rtc_data_channel** out_channel);
+
+/* Copied at registration; null clears it. Register before the channel opens or
+ * the open transition is missed -- for a channel arriving through
+ * on_data_channel that means registering inside the callback. */
+RTC_API rtc_status RTC_CALL
+rtc_data_channel_set_observer(rtc_data_channel* channel,
+                              const rtc_data_channel_observer* observer,
+                              void* user_data);
+
+/* Fails with RTC_ERR_INVALID_STATE unless the channel is open. */
+RTC_API rtc_status RTC_CALL rtc_data_channel_send(rtc_data_channel* channel,
+                                                  const uint8_t* data,
+                                                  int32_t size,
+                                                  int32_t is_binary);
+
+/* out_label is caller-owned; free with rtc_string_free. */
+RTC_API rtc_status RTC_CALL
+rtc_data_channel_get_label(rtc_data_channel* channel, char** out_label);
+
+/* -1 until the channel is negotiated and the transport has assigned one. */
+RTC_API rtc_status RTC_CALL rtc_data_channel_get_id(rtc_data_channel* channel,
+                                                    int32_t* out_id);
+
+RTC_API rtc_status RTC_CALL
+rtc_data_channel_get_state(rtc_data_channel* channel,
+                           rtc_data_channel_state* out_state);
+
+RTC_API rtc_status RTC_CALL
+rtc_data_channel_get_buffered_amount(rtc_data_channel* channel,
+                                     uint64_t* out_amount);
+
+RTC_API rtc_status RTC_CALL rtc_data_channel_close(rtc_data_channel* channel);
+
+RTC_API void RTC_CALL rtc_data_channel_release(rtc_data_channel* channel);
 
 /* -------------------------------------------------------------------------
  *  Video frames

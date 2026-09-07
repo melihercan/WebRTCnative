@@ -12,6 +12,7 @@
 
 #include "Interop.h"
 #include "api/audio/audio_device.h"
+#include "api/data_channel_interface.h"
 #include "api/media_stream_interface.h"
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
@@ -46,6 +47,7 @@ extern std::unique_ptr<Runtime> g_runtime;
 char* DuplicateString(const char* value);
 
 class InteropObserver;
+class InteropDataChannelObserver;
 class FrameSink;
 
 }  // namespace webrtc_interop
@@ -78,6 +80,18 @@ struct rtc_media_track {
   /* Set while a frame sink is registered. Unregistered by the destructor, so
    * releasing a track with a live sink cannot leave a dangling registration. */
   std::unique_ptr<webrtc_interop::FrameSink> sink;
+};
+
+struct rtc_data_channel {
+  rtc_data_channel();
+  ~rtc_data_channel();
+
+  /* Declaration order is load-bearing here for the same reason as the peer
+   * connection: the channel calls into its observer until it is gone. The
+   * destructor also unregisters explicitly, because the channel is refcounted
+   * by the peer connection and can outlive this handle. */
+  std::unique_ptr<webrtc_interop::InteropDataChannelObserver> observer;
+  webrtc::scoped_refptr<webrtc::DataChannelInterface> channel;
 };
 
 struct rtc_peer_connection {

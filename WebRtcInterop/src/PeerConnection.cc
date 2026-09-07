@@ -223,9 +223,25 @@ class InteropObserver : public webrtc::PeerConnectionObserver {
     }
   }
 
-  /* Required by the interface, not part of slice one. */
   void OnDataChannel(webrtc::scoped_refptr<webrtc::DataChannelInterface>
-                     /* channel */) override {}
+                         channel) override {
+    if (callbacks_.on_data_channel == nullptr || channel == nullptr) {
+      return;
+    }
+
+    /* Rule 1: a handle delivered through a callback belongs to the receiver.
+     * Created owning and never released here. The receiver registers its own
+     * observer inside the callback, before the channel can open. */
+    rtc_data_channel* handle = new (std::nothrow) rtc_data_channel();
+    if (handle == nullptr) {
+      return;
+    }
+    handle->channel = std::move(channel);
+
+    callbacks_.on_data_channel(user_data_, handle);
+  }
+
+  /* Required by the interface; the aggregate connection state covers it. */
   void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState
                             /* state */) override {}
 
