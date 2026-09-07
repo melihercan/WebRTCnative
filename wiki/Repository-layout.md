@@ -47,13 +47,16 @@ SIPSorcery.
 Built by [WebRtcNativeInteropWindows](Workflow-reference), which is the only workflow here that
 compiles code from this repository rather than from Google's tree.
 
-| File | Status |
+| File | Contents |
 |---|---|
+| `include/Interop.h` | the public ABI — the only file a caller needs |
+| `src/Internal.h` | handle definitions, shared between the translation units |
+| `src/Interop.cc` | library lifecycle, factory, device enumeration, tracks |
+| `src/PeerConnection.cc` | peer connection, observers, negotiation |
+| `src/DataChannel.cc` | SCTP data channels |
+| `src/FrameSink.cc` | video frame delivery |
+| `test/` | C harnesses that load the built DLL and drive it |
 | `BUILD.gn` | declares `rtc_shared_library("WebRtcInterop")` with its dependency list |
-| `src/Interop.cc` | three factory exports, plus a stalled `CallCreatePeerConnectionFactory` |
-| `include/Interop.h` | **empty** — the exports have no declared header yet |
-| `test/Tests.cc` | **empty** |
-| `helper.h` | vendored from webrtc-sdk/libwebrtc |
 | `.clang-format`, `format.sh`, `NOTICE` | Chromium style, formatter, upstream notice |
 
 ### How it builds
@@ -64,20 +67,18 @@ copies this directory to `src/WebRtcInterop` and appends `"//WebRtcInterop"` to 
 `group("default")` deps so ninja reaches it. That graft is edit 6 on top of the standard
 [shared-library patch](Shared-library-patch).
 
-### Where the work stopped
+That is not merely convenient. `webrtc.dll` is compiled with clang against libc++, and anything
+MSVC compiles has a different `std::string`, allocator and exception model — so the shim has to be
+built by the same toolchain, from inside the same tree.
 
-`Interop.cc` exports `CreateBuiltinAudioEncoderFactory`, `CreateBuiltinVideoEncoderFactory` and
-`CreateBuiltinVideoDecoderFactory`. The video ones use `.release()` on a `unique_ptr`, which is
-sound; the audio one takes the address of a temporary `scoped_refptr`, which is not — it returns a
-dangling pointer.
+### The convention it follows
 
-`CallCreatePeerConnectionFactory` is commented out entirely. That is the real problem this shim has
-to solve: WebRTC hands back `scoped_refptr` and `unique_ptr`, and neither survives a C boundary
-without an explicit ownership convention.
+[Interop ABI](Interop-ABI) is the specification: the ownership rule, the threading rule, the string
+rules, and the verified struct layouts. Read it before adding a function; the conventions are not
+obvious from the header alone.
 
-[Interop ABI](Interop-ABI) settles that convention and specifies the first slice. The 2023 code
-predates it and does not follow it — treat the directory as a build harness that works, and the ABI
-page as what to write into it.
+Everything the ABI page lists is implemented — the twenty-five functions of slice one, plus data
+channels — and each area has a test in `test/` that drives it against the built DLL.
 
 This work dates from 2023 and predates the current workflows. Its original standalone repository
 was folded in here; the full history is preserved on the `archive/webrtcinterop-2023` branch.

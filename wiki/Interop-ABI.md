@@ -201,7 +201,9 @@ Confirmed by compiling the header with the same `clang-cl` that builds `webrtc.d
 | `rtc_ice_server` | 24 | `urls` 0, `username` 8, `password` 16 |
 | `rtc_configuration` | 16 | `ice_servers` 0, `ice_server_count` 8 |
 | `rtc_video_frame` | 56 | `y` 0, `width` 36, `timestamp_us` 48 |
-| `rtc_peer_connection_observer` | 40 | five function pointers |
+| `rtc_peer_connection_observer` | 48 | six function pointers, `on_data_channel` at 40 |
+| `rtc_data_channel_init` | 32 | `protocol` 0, `ordered` 8, `max_packet_life_time` 12, `max_retransmits` 16, `negotiated` 20, `id` 24 |
+| `rtc_data_channel_observer` | 24 | three function pointers |
 
 The header also compiles clean as C11 and as C++17 under `/W4`, so it can be consumed by a C
 caller, a C++ caller, or read as documentation without a toolchain.
@@ -211,10 +213,11 @@ caller, a C++ caller, or read as documentation without a toolchain.
 The smallest surface that carries an audio and video call between two Windows peers. Twenty-five
 functions, declared in `WebRtcInterop/include/Interop.h`.
 
-**All twenty-five are implemented.** Three tests in `WebRtcInterop/test/` cover them:
-`Handshake.c` drives a full offer/answer/ICE exchange between two peer connections, `FrameSink.c`
-opens a camera and checks the delivered frames, and `Devices.c` enumerates every device kind and
-exercises the error paths.
+**All twenty-five are implemented**, and data channels have since been added on top — see below.
+Four tests in `WebRtcInterop/test/` cover the surface: `Handshake.c` drives a full offer/answer/ICE
+exchange between two peer connections, `FrameSink.c` opens a camera and checks the delivered
+frames, `Devices.c` enumerates every device kind and exercises the error paths, and
+`DataChannel.c` opens a channel across a handshake and sends both ways.
 
 ### Library — **implemented**
 
@@ -398,11 +401,60 @@ destructor rather than leaving WebRTC holding a pointer into freed memory.
 Measured against a real camera: 85 frames in 2.80 s — 30.4 fps against a requested 30 — at
 640x480 with strides y=640, u=320, v=320, no null planes and no blank rows.
 
-## Deliberately out of slice one
+## Data channels — **implemented**
 
-Data channels, `getStats`, transceivers and `getUserMedia` constraint negotiation, simulcast,
-screen capture via `rtc_desktop_capturer`, insertable streams, DTMF, and renegotiation beyond a
-single offer/answer. Each is additive and none changes the conventions above.
+Nine functions, added after slice one and following the same conventions.
+
+```c
+rtc_peer_connection_create_data_channel(pc, label, init, &channel);
+rtc_data_channel_set_observer(channel, &observer, user_data);
+rtc_data_channel_send(channel, data, size, is_binary);
+rtc_data_channel_get_label(channel, &label);       /* caller frees   */
+rtc_data_channel_get_id(channel, &id);             /* -1 until open  */
+rtc_data_channel_get_state(channel, &state);
+rtc_data_channel_get_buffered_amount(channel, &amount);
+rtc_data_channel_close(channel);
+rtc_data_channel_release(channel);
+```
+
+Create the channel **before** the offer and it rides along as an `m=application` section; create
+it afterwards and `on_renegotiation_needed` fires, exactly as in the W3C API.
+
+Three decisions are worth knowing before adding to this area.
+
+**The observer is registered separately, not passed to the create call.** A channel that arrives
+through `on_data_channel` does not exist until that callback runs, so there is nowhere to have
+passed an observer. Making registration a separate step gives both cases one shape — and it means
+an incoming channel *must* be observed from inside the callback, because the open transition can
+follow immediately and is otherwise missed.
+
+**`rtc_data_channel_init` carries its optional members as `int32_t` with `-1` for unset**, rather
+than pointers to values. It keeps the struct blittable for P/Invoke, and `-1` is not a value any of
+`max_packet_life_time`, `max_retransmits` or `id` can legitimately take.
+
+**`on_data_channel` was appended to `rtc_peer_connection_observer`, not inserted.** The struct is
+passed by address and read field by field, so the five original members keep their offsets and a
+caller compiled against the shorter struct still works. Anything added here later must go on the
+end for the same reason.
+
+Sending is asynchronous. The status reports that the channel was open and the payload was
+accepted — not that it was delivered — which matches `rtc_peer_connection_create_offer` here and
+the W3C `send()`, and avoids WebRTC's own `Send()` bool that its header documents as unreliable.
+Failures after acceptance are logged, not surfaced.
+
+The handle unregisters its observer explicitly in its destructor rather than relying on member
+destruction order, because the peer connection holds its own reference and the channel can outlive
+the handle.
+
+`test/DataChannel.c` covers it against a real handshake: `m=application` in the offer, both ends
+reaching open with matching ids, text and binary each way with the binary flag intact, the error
+paths, and release with a live observer still registered.
+
+## Still out of scope
+
+`getStats`, transceivers and `getUserMedia` constraint negotiation, simulcast, screen capture via
+`rtc_desktop_capturer`, insertable streams, DTMF, `replaceTrack`, ICE restart, and renegotiation
+beyond a single offer/answer. Each is additive and none changes the conventions above.
 
 ## Working notes
 
