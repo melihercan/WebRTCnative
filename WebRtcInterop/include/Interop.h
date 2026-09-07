@@ -62,6 +62,7 @@ typedef struct rtc_factory rtc_factory;
 typedef struct rtc_peer_connection rtc_peer_connection;
 typedef struct rtc_media_track rtc_media_track;
 typedef struct rtc_data_channel rtc_data_channel;
+typedef struct rtc_rtp_sender rtc_rtp_sender;
 
 /* -------------------------------------------------------------------------
  *  Enumerations
@@ -367,10 +368,35 @@ rtc_peer_connection_add_ice_candidate(rtc_peer_connection* pc,
                                       int32_t mline_index,
                                       const char* sdp);
 
+/* out_sender may be null when the caller does not intend to replace or remove
+ * the track later; otherwise it receives a handle to release. */
 RTC_API rtc_status RTC_CALL
 rtc_peer_connection_add_track(rtc_peer_connection* pc,
                               rtc_media_track* track,
-                              const char* stream_id);
+                              const char* stream_id,
+                              rtc_rtp_sender** out_sender);
+
+/* -------------------------------------------------------------------------
+ *  Senders
+ *
+ *  What add_track hands back, so a track can be swapped or removed after the
+ *  fact. There is deliberately no get_senders: the caller already knows what
+ *  it added, and a list function would hand back handles whose ownership is
+ *  ambiguous.
+ * ---------------------------------------------------------------------- */
+
+/* W3C replaceTrack. Passing a null track stops sending without renegotiating,
+ * which is how a camera is muted at the transport rather than the source. The
+ * new track must be the same kind as the old one. */
+RTC_API rtc_status RTC_CALL
+rtc_rtp_sender_replace_track(rtc_rtp_sender* sender, rtc_media_track* track);
+
+/* The sender handle stays valid and must still be released. */
+RTC_API rtc_status RTC_CALL
+rtc_peer_connection_remove_track(rtc_peer_connection* pc,
+                                 rtc_rtp_sender* sender);
+
+RTC_API void RTC_CALL rtc_rtp_sender_release(rtc_rtp_sender* sender);
 
 /* -------------------------------------------------------------------------
  *  Data channels

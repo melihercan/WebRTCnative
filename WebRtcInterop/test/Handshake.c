@@ -25,7 +25,8 @@ typedef rtc_status(__cdecl* fsdp)(rtc_peer_connection*, rtc_on_sdp_success_fn,
 typedef rtc_status(__cdecl* fset)(rtc_peer_connection*, const char*, const char*,
                                   rtc_on_void_success_fn, rtc_on_failure_fn, void*);
 typedef rtc_status(__cdecl* fice)(rtc_peer_connection*, const char*, int32_t, const char*);
-typedef rtc_status(__cdecl* fadd)(rtc_peer_connection*, rtc_media_track*, const char*);
+typedef rtc_status(__cdecl* fadd)(rtc_peer_connection*, rtc_media_track*, const char*,
+                                  rtc_rtp_sender**);
 
 static fset g_set_local, g_set_remote;
 static fsdp g_create_answer;
@@ -133,7 +134,7 @@ int main(void) {
   rtc_media_track* audio = NULL;
   rtc_audio_track_create(f, "mic", &audio);
   printf("pc1 add_track %d\n\n--- negotiation ---\n",
-         (int)rtc_peer_connection_add_track(g_pc1, audio, "stream0"));
+         (int)rtc_peer_connection_add_track(g_pc1, audio, "stream0", NULL));
 
   rtc_peer_connection_create_offer(g_pc1, on_offer, on_fail, NULL);
   for (int i = 0; i < 100 && !g_answer_done; i++) Sleep(50);

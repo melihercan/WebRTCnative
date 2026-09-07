@@ -13,6 +13,7 @@
 #include "Interop.h"
 #include "api/audio/audio_device.h"
 #include "api/data_channel_interface.h"
+#include "api/rtp_sender_interface.h"
 #include "api/media_stream_interface.h"
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
@@ -80,6 +81,10 @@ struct rtc_media_track {
   /* Set while a frame sink is registered. Unregistered by the destructor, so
    * releasing a track with a live sink cannot leave a dangling registration. */
   std::unique_ptr<webrtc_interop::FrameSink> sink;
+};
+
+struct rtc_rtp_sender {
+  webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender;
 };
 
 struct rtc_data_channel {

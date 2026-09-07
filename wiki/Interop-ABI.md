@@ -214,10 +214,11 @@ The smallest surface that carries an audio and video call between two Windows pe
 functions, declared in `WebRtcInterop/include/Interop.h`.
 
 **All twenty-five are implemented**, and data channels have since been added on top — see below.
-Four tests in `WebRtcInterop/test/` cover the surface: `Handshake.c` drives a full offer/answer/ICE
+Five tests in `WebRtcInterop/test/` cover the surface: `Handshake.c` drives a full offer/answer/ICE
 exchange between two peer connections, `FrameSink.c` opens a camera and checks the delivered
 frames, `Devices.c` enumerates every device kind and exercises the error paths, and
-`DataChannel.c` opens a channel across a handshake and sends both ways.
+`DataChannel.c` opens a channel across a handshake and sends both ways, and `Sender.c`
+replaces and removes a track on a live sender.
 
 ### Library — **implemented**
 
@@ -450,11 +451,51 @@ the handle.
 reaching open with matching ids, text and binary each way with the binary flag intact, the error
 paths, and release with a live observer still registered.
 
+## Senders — **implemented**
+
+`add_track` gained an out-parameter and three functions joined it.
+
+```c
+rtc_peer_connection_add_track(pc, track, stream_id, &sender);  /* sender may be null */
+rtc_rtp_sender_replace_track(sender, track);                   /* track may be null  */
+rtc_peer_connection_remove_track(pc, sender);
+rtc_rtp_sender_release(sender);
+```
+
+**This changed an existing signature**, unlike the data channel slice which only appended. A
+caller built against the four-argument `add_track` will not work against the three-argument one
+and vice versa, so the shim and the binding have to move together. That is acceptable here
+because they ship as a pair, but it is the reason the observer struct got a new member on the end
+rather than the same treatment.
+
+`out_sender` is nullable, and that is the normal case: a caller that will never replace or remove
+the track passes null and has no handle to release. The track is added either way.
+
+**`replace_track` is the point of the slice.** It swaps what a sender transmits *without*
+renegotiating — no new offer, no interruption, the connection stays up. Doing the same thing as
+remove-then-add would force a fresh offer/answer round and a visible gap. A null track is
+meaningful rather than an error: it stops the sender while leaving the transport in place, which
+is how muting is done at the sender rather than at the source.
+
+**`remove_track` is idempotent**, which surprised the test before it surprised anyone else. W3C
+`removeTrack` aborts quietly when the sender's track is already null, so a second removal returns
+`RTC_OK` rather than an error. The test originally asserted `RTC_ERR_INVALID_STATE` and was wrong.
+
+There is deliberately **no `get_senders`**. The caller already knows what it added, and a list
+function would hand back handles whose ownership is ambiguous — every other handle here has
+exactly one owner and one release.
+
+`test/Sender.c` covers it against a live connection: replacing with a same-kind track, with null,
+and back; a video track refused on an audio sender; the connection still connected and *no*
+renegotiation raised by any of it; removal, second removal, the null-argument paths, and release.
+
 ## Still out of scope
 
 `getStats`, transceivers and `getUserMedia` constraint negotiation, simulcast, screen capture via
-`rtc_desktop_capturer`, insertable streams, DTMF, `replaceTrack`, ICE restart, and renegotiation
-beyond a single offer/answer. Each is additive and none changes the conventions above.
+`rtc_desktop_capturer`, insertable streams, DTMF, ICE restart, receivers, audio device *selection*
+(enumeration works; `audio_track_create` takes no device id), and an `on_ice_gathering_state`
+callback — without which a caller can observe gathering starting but never completing. Each is
+additive and none changes the conventions above.
 
 ## Working notes
 

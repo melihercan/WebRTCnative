@@ -477,15 +477,73 @@ rtc_peer_connection_add_ice_candidate(rtc_peer_connection* pc,
 RTC_API rtc_status RTC_CALL
 rtc_peer_connection_add_track(rtc_peer_connection* pc,
                               rtc_media_track* track,
-                              const char* stream_id) {
+                              const char* stream_id,
+                              rtc_rtp_sender** out_sender) {
   if (pc == nullptr || track == nullptr || stream_id == nullptr) {
     return RTC_ERR_INVALID_ARG;
   }
+  if (out_sender != nullptr) {
+    *out_sender = nullptr;
+  }
+
   std::vector<std::string> stream_ids;
   stream_ids.push_back(stream_id);
   auto result = pc->pc->AddTrack(track->track, stream_ids);
   if (!result.ok()) {
     return RTC_ERR_INVALID_STATE;
   }
+
+  /* The track is added either way; the handle is only built when asked for,
+   * so a caller that never replaces or removes has nothing to release. */
+  if (out_sender == nullptr) {
+    return RTC_OK;
+  }
+
+  rtc_rtp_sender* handle = new (std::nothrow) rtc_rtp_sender();
+  if (handle == nullptr) {
+    return RTC_ERR_INTERNAL;
+  }
+  handle->sender = result.MoveValue();
+
+  *out_sender = handle;
   return RTC_OK;
+}
+
+/* -------------------------------------------------------------------------
+ *  Senders
+ * ---------------------------------------------------------------------- */
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_sender_replace_track(rtc_rtp_sender* sender, rtc_media_track* track) {
+  if (sender == nullptr || sender->sender == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+
+  /* A null track is meaningful: it stops the sender without renegotiating. */
+  webrtc::MediaStreamTrackInterface* raw =
+      track == nullptr ? nullptr : track->track.get();
+
+  /* SetTrack fails when the kinds differ or the peer connection is closed; it
+   * does not distinguish the two, so report the argument error, which is the
+   * one a caller can act on. */
+  return sender->sender->SetTrack(raw) ? RTC_OK : RTC_ERR_INVALID_ARG;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_peer_connection_remove_track(rtc_peer_connection* pc,
+                                 rtc_rtp_sender* sender) {
+  if (pc == nullptr || sender == nullptr || sender->sender == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+
+  webrtc::RTCError error = pc->pc->RemoveTrackOrError(sender->sender);
+  if (!error.ok()) {
+    RTC_LOG(LS_ERROR) << "remove_track failed: " << error.message();
+    return RTC_ERR_INVALID_STATE;
+  }
+  return RTC_OK;
+}
+
+RTC_API void RTC_CALL rtc_rtp_sender_release(rtc_rtp_sender* sender) {
+  delete sender;
 }
