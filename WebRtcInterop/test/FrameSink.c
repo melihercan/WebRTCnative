@@ -79,6 +79,18 @@ int main(void) {
   printf("add_sink twice       %d (expect -2 INVALID_STATE)\n",
          (int)rtc_video_track_add_sink(vt, on_frame, NULL));
 
+  /* The camera is open now, so a second open of the same device must report
+   * INVALID_STATE -- in use -- and not NOT_FOUND, which would send a caller
+   * hunting for hardware that is present all along. */
+  rtc_media_track* busy = NULL;
+  printf("open while in use    %d (expect -2, NOT -3)\n",
+         (int)rtc_video_track_create(f, id, "cam1", 640, 480, 30, &busy));
+  if (busy) { rtc_media_track_release(busy); busy = NULL; }
+
+  printf("open unknown device  %d (expect -3 NOT_FOUND)\n",
+         (int)rtc_video_track_create(f, "no-such-device", "cam2", 640, 480, 30, &busy));
+  if (busy) { rtc_media_track_release(busy); busy = NULL; }
+
   rtc_media_track* at = NULL;
   rtc_audio_track_create(f, "mic", &at);
   printf("add_sink on audio    %d (expect -1 INVALID_ARG)\n",

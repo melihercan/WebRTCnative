@@ -297,7 +297,13 @@ RTC_API rtc_status RTC_CALL rtc_audio_track_create(rtc_factory* factory,
 
 /* label becomes the track id, so keep it SDP-safe. Do not pass the device id:
  * a Windows device path contains backslashes and braces and would end up in
- * the msid attribute. */
+ * the msid attribute.
+ *
+ * RTC_ERR_NOT_FOUND means no device matches device_id. RTC_ERR_INVALID_STATE
+ * means the device is there but would not start, which is nearly always
+ * another application holding the camera and occasionally a size or frame rate
+ * it will not accept. The two are worth telling apart: the first is missing
+ * hardware, the second is a camera someone else is using. */
 RTC_API rtc_status RTC_CALL rtc_video_track_create(rtc_factory* factory,
                                                    const char* device_id,
                                                    const char* label,

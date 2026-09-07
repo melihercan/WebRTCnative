@@ -280,6 +280,14 @@ has something to select with.
 
 ### Tracks — **implemented**
 
+`rtc_video_track_create` distinguishes two failures that look identical from the outside.
+`RTC_ERR_NOT_FOUND` means no device matches the id. `RTC_ERR_INVALID_STATE` means the device is
+there but would not start, which is nearly always another application holding the camera. They
+were originally both `NOT_FOUND`, and that cost real time twice in one afternoon: a camera busy on
+one machine and a camera not yet enumerated on another both reported as missing hardware, so the
+search started in the wrong place. `test/FrameSink.c` now asserts the pair by opening the camera a
+second time while it is live.
+
 ```c
 rtc_status rtc_audio_track_create(rtc_factory* f, const char* label,
                                   rtc_media_track** out_track);

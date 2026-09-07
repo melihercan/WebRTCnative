@@ -80,13 +80,22 @@ namespace {
 class CameraSource : public webrtc::AdaptedVideoTrackSource,
                      public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
  public:
+  /* out_status separates "no such device" from "the device is there but will
+   * not start", which are the same nullptr but very different problems: the
+   * second is almost always another application holding the camera. Reporting
+   * both as NOT_FOUND sends the caller looking for missing hardware. */
   static webrtc::scoped_refptr<CameraSource> Create(const char* device_id,
                                                     int32_t width,
                                                     int32_t height,
-                                                    int32_t fps) {
+                                                    int32_t fps,
+                                                    rtc_status* out_status) {
+    *out_status = RTC_OK;
+
     webrtc::scoped_refptr<webrtc::VideoCaptureModule> module =
         webrtc::VideoCaptureFactory::Create(device_id);
     if (module == nullptr) {
+      RTC_LOG(LS_ERROR) << "no capture device matches id " << device_id;
+      *out_status = RTC_ERR_NOT_FOUND;
       return nullptr;
     }
 
@@ -101,6 +110,11 @@ class CameraSource : public webrtc::AdaptedVideoTrackSource,
     module->RegisterCaptureDataCallback(source.get());
     if (module->StartCapture(capability) != 0) {
       module->DeRegisterCaptureDataCallback();
+      RTC_LOG(LS_ERROR) << "capture device " << device_id << " exists but would "
+                        << "not start at " << width << "x" << height << "@"
+                        << fps << "; it is probably in use by another "
+                        << "application";
+      *out_status = RTC_ERR_INVALID_STATE;
       return nullptr;
     }
 
@@ -484,10 +498,12 @@ RTC_API rtc_status RTC_CALL rtc_video_track_create(rtc_factory* factory,
   }
   *out_track = nullptr;
 
+  rtc_status create_status = RTC_OK;
   webrtc::scoped_refptr<webrtc_interop::CameraSource> source =
-      webrtc_interop::CameraSource::Create(device_id, width, height, fps);
+      webrtc_interop::CameraSource::Create(device_id, width, height, fps,
+                                           &create_status);
   if (source == nullptr) {
-    return RTC_ERR_NOT_FOUND;
+    return create_status;
   }
 
   /* The track takes a reference to the source, so the camera stays open for
