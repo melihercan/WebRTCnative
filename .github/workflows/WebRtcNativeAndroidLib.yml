@@ -117,17 +117,20 @@ jobs:
           # An AAR missing the generated JNI classes builds, packages and uploads
           # without complaint, then throws NoClassDefFoundError on the first line
           # an app runs. Check the classes are in there before calling it an
-          # artifact. PeerConnectionFactoryJni stands in for the whole set: it is
-          # the one PeerConnectionFactory.initialize needs.
+          # artifact. Both halves matter: the generated *Jni classes, and the
+          # GEN_JNI registry every one of them calls into. An archive with the
+          # first and not the second crashes just as surely, one class later.
           python3 - "$aar" <<'PY'
           import io, sys, zipfile
           aar = zipfile.ZipFile(sys.argv[1])
           classes = zipfile.ZipFile(io.BytesIO(aar.read('classes.jar'))).namelist()
           jni = [c for c in classes if c.endswith('Jni.class')]
           print('classes.jar: %d classes, %d generated JNI' % (len(classes), len(jni)))
-          if not any(c.endswith('PeerConnectionFactoryJni.class') for c in classes):
-              sys.exit('::error::classes.jar has no PeerConnectionFactoryJni; the '
-                       'generated JNI patch did not take and this AAR would crash on startup.')
+          missing = [n for n in ('org/webrtc/PeerConnectionFactoryJni.class',
+                                 'org/jni_zero/GEN_JNI.class') if n not in classes]
+          if missing:
+              sys.exit('::error::classes.jar is missing %s; the generated JNI patch did not '
+                       'take and this AAR would crash on startup.' % ', '.join(missing))
           PY
 
           cp "$aar" "$GITHUB_WORKSPACE/libwebrtc.aar"
