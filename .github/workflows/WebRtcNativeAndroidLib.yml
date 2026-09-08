@@ -98,12 +98,33 @@ jobs:
         run: |
           set -euxo pipefail
           cd "$HOME/webrtc-checkout/src"
+
+          # Two things here are load-bearing.
+          #
+          # --build-dir is passed so the next step can find the generated
+          # GEN_JNI.java; left alone, build_aar.py uses a temporary directory.
+          #
+          # The gn args turn jni_zero multiplexing off. build_aar.py builds
+          # release and non-component, which switches it on, and in that mode the
+          # JNI registry ships as J/N with a forwarding GEN_JNI that the APK-time
+          # optimiser is expected to inline away. That step never happens for a
+          # consumed AAR, so the archive ends up with J/N while the generated
+          # *Jni classes call a GEN_JNI that is not there. With multiplexing off,
+          # jni_registration_generator writes one real GEN_JNI instead.
           if [ -n "${ARCH// /}" ]; then
             # shellcheck disable=SC2086
-            ./tools_webrtc/android/build_aar.py --output ./libwebrtc.aar --arch $ARCH
+            ./tools_webrtc/android/build_aar.py --output ./libwebrtc.aar               --build-dir ./out_aar --arch $ARCH               --extra-gn-args enable_jni_multiplexing=false use_hashed_jni_names=false
           else
-            ./tools_webrtc/android/build_aar.py --output ./libwebrtc.aar
+            ./tools_webrtc/android/build_aar.py --output ./libwebrtc.aar               --build-dir ./out_aar               --extra-gn-args enable_jni_multiplexing=false use_hashed_jni_names=false
           fi
+
+      - name: Put GEN_JNI into the archive
+        run: |
+          set -euxo pipefail
+          cd "$HOME/webrtc-checkout/src"
+          # The registration library's javac jar is empty, so dist_jar merges
+          # nothing and GEN_JNI never reaches classes.jar. See the script.
+          python3 "$GITHUB_WORKSPACE/tools/inject_gen_jni.py"             --aar ./libwebrtc.aar --build-dir ./out_aar --src-root .
 
       - name: Collect libwebrtc.aar
         run: |

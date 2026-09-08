@@ -49,6 +49,12 @@ REGISTRATION_LIBRARY = """  rtc_android_library("libwebrtc_jni_registration_java
 
 REGISTRATION_TARGET = "libwebrtc_jni_registration_java"
 
+# Not every generated JNI target lives in sdk/android or follows the generated_*
+# name. Logging.java is in rtc_base, so its stubs come from generate_jni
+# ("base_java_jni") there; the dist_jar takes rtc_base:base_java but not this.
+# Without it the app dies on org.webrtc.LoggingJni instead.
+EXTERNAL_JNI_DEPS = ["../../rtc_base:base_java_jni_java"]
+
 TEST_ONLY = {
     "generated_instrumentationtests_jni_java",
     "generated_native_unittests_jni_java",
@@ -98,6 +104,15 @@ def patch(text):
         raise SystemExit(
             "The dist_jar target has no recognisable deps list; this patch needs updating."
         )
+
+    # The "../.." entries sort as their own group after the ":" ones. Applied to
+    # patched_block only: block has to keep matching the original text.
+    external = re.findall(r'^      "\.\./[^"]+",$', patched_block, re.M)
+    want_external = sorted(set(external) | {'      "%s",' % d for d in EXTERNAL_JNI_DEPS})
+    if external and want_external != external:
+        sep = chr(10)
+        patched_block = patched_block.replace(
+            sep.join(external), sep.join(want_external), 1)
 
     patched = text.replace(block, patched_block, 1)
 
