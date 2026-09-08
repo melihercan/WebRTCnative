@@ -14,9 +14,17 @@ reach classes.jar, and an app using the AAR dies on startup:
         Failed resolution of: Lorg/webrtc/PeerConnectionFactoryJni;
       at org.webrtc.PeerConnectionFactory.initialize(PeerConnectionFactory.java:328)
 
-This adds those targets to the dist_jar so the generated classes ship with the
-API that calls them. The two test-only generators are left out; an AAR for
-distribution has no use for them.
+That is only half of it. Every generated *Jni class calls into org.jni_zero.GEN_JNI,
+jni_zero's per-binary registry of native methods, which is produced by the
+implicit libjingle_peerconnection_so__jni_registration target -- rtc_shared_library
+is shared_library_with_jni on Android, so that sub-target exists. Nothing packages
+it either, so shipping the *Jni classes alone just moves the crash one class along:
+
+    java.lang.ClassNotFoundException: Didn't find class "org.jni_zero.GEN_JNI"
+
+This adds both: a small library carrying the registration srcjar, and the
+generated JNI targets, all wired into the dist_jar. The two test-only generators
+are left out; an AAR for distribution has no use for them.
 
 Run it against a WebRTC checkout, or against a copy of sdk/android/BUILD.gn to
 test it off CI:
@@ -29,6 +37,18 @@ import re
 import sys
 
 # Generators for WebRTC's own test binaries, not part of the distributed API.
+# The library carrying GEN_JNI. Declared here rather than reusing an existing java
+# target: the registration walks the shared library's dependency closure, and
+# feeding its srcjar back into a library that closure contains would be a cycle.
+REGISTRATION_LIBRARY = """  rtc_android_library("libwebrtc_jni_registration_java") {
+    srcjar_deps = [ ":libjingle_peerconnection_so__jni_registration" ]
+    deps = [ "//third_party/jni_zero:jni_zero_java" ]
+  }
+
+"""
+
+REGISTRATION_TARGET = "libwebrtc_jni_registration_java"
+
 TEST_ONLY = {
     "generated_instrumentationtests_jni_java",
     "generated_native_unittests_jni_java",
@@ -58,18 +78,36 @@ def patch(text):
             "targets have been renamed and this patch needs updating."
         )
 
+    wanted.append(REGISTRATION_TARGET)
+
     missing = [t for t in wanted if '":%s"' % t not in block]
     if not missing:
         return text, []
 
-    added = "".join('      ":%s",\n' % target for target in missing)
-    patched_block = block.replace("    deps = [\n", "    deps = [\n" + added, 1)
+    # gn format keeps a deps list alphabetical, so merge rather than prepend:
+    # appending at the top would make every patched build fail a format check.
+    local = re.findall(r'^      ":[^"]+",$', block, re.M)
+    merged = sorted(set(local) | {'      ":%s",' % t for t in missing})
+    if not local:
+        raise SystemExit(
+            "The dist_jar target has no recognisable deps list; this patch needs updating."
+        )
+    joiner = "\n"
+    patched_block = block.replace(joiner.join(local), joiner.join(merged), 1)
     if patched_block == block:
         raise SystemExit(
             "The dist_jar target has no recognisable deps list; this patch needs updating."
         )
 
-    return text.replace(block, patched_block, 1), missing
+    patched = text.replace(block, patched_block, 1)
+
+    # Declare the registration library just above the dist_jar that consumes it.
+    if 'rtc_android_library("%s")' % REGISTRATION_TARGET not in patched:
+        patched = patched.replace(
+            '  dist_jar("libwebrtc") {', REGISTRATION_LIBRARY + '  dist_jar("libwebrtc") {', 1
+        )
+
+    return patched, missing
 
 
 def main(argv):
