@@ -1,7 +1,8 @@
 # Builds the WebRTC Android archive (libwebrtc.aar) for the MAUI Android bindings.
 #
 # Android does not use the shared-library patch: build_aar.py already produces a
-# .aar containing the JNI shared objects and the Java API.
+# .aar containing the JNI shared objects and the Java API. It does need a patch of
+# its own, though -- see the "Patch the AAR's class list" step.
 
 name: WebRtcNativeAndroidLib
 
@@ -80,6 +81,17 @@ jobs:
           fi
           git log -1 --oneline
 
+      - name: Patch the AAR's class list
+        run: |
+          set -euxo pipefail
+          # dist_jar("libwebrtc") merges only the jars of the targets it lists, and
+          # jni_zero generates the JNI glue into separate targets it does not.
+          # Without this the AAR ships PeerConnectionFactory but not
+          # PeerConnectionFactoryJni, and initialize() throws NoClassDefFoundError
+          # on the first line an app runs. The script asserts its anchors and is
+          # idempotent; if an assertion fires, update the script, do not skip it.
+          python3 "$GITHUB_WORKSPACE/tools/add_generated_jni_to_aar.py"             "$HOME/webrtc-checkout/src/sdk/android/BUILD.gn"
+
       - name: Build the AAR
         env:
           ARCH: ${{ inputs.arch }}
@@ -101,6 +113,23 @@ jobs:
           ls -lh "$aar"
           # Record the ABIs actually packaged, so consumers can check at a glance.
           unzip -l "$aar" | grep -E '\.so$' || true
+
+          # An AAR missing the generated JNI classes builds, packages and uploads
+          # without complaint, then throws NoClassDefFoundError on the first line
+          # an app runs. Check the classes are in there before calling it an
+          # artifact. PeerConnectionFactoryJni stands in for the whole set: it is
+          # the one PeerConnectionFactory.initialize needs.
+          python3 - "$aar" <<'PY'
+          import io, sys, zipfile
+          aar = zipfile.ZipFile(sys.argv[1])
+          classes = zipfile.ZipFile(io.BytesIO(aar.read('classes.jar'))).namelist()
+          jni = [c for c in classes if c.endswith('Jni.class')]
+          print('classes.jar: %d classes, %d generated JNI' % (len(classes), len(jni)))
+          if not any(c.endswith('PeerConnectionFactoryJni.class') for c in classes):
+              sys.exit('::error::classes.jar has no PeerConnectionFactoryJni; the '
+                       'generated JNI patch did not take and this AAR would crash on startup.')
+          PY
+
           cp "$aar" "$GITHUB_WORKSPACE/libwebrtc.aar"
 
       - name: Upload libwebrtc.aar

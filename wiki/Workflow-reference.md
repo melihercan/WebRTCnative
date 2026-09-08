@@ -99,7 +99,38 @@ Fetches `webrtc_android` rather than `webrtc`; that solution pulls the Android S
 `build_aar.py` needs.
 
 No shared-library patch is involved — `build_aar.py` already produces an `.aar` containing JNI
-shared objects plus the Java API.
+shared objects plus the Java API. It does need a patch of its own, though.
+
+### The generated-JNI patch
+
+`build_aar.py` takes `classes.jar` straight from the `dist_jar("libwebrtc")` target in
+`sdk/android/BUILD.gn`. That target sets `direct_deps_only = true`, so only the jars of the targets
+it lists itself are merged, not their dependencies.
+
+Since WebRTC moved to **jni_zero**, the JNI glue no longer lives in the Java libraries. It is
+generated into separate `generated_*_jni_java` targets which those libraries depend on and which
+the `dist_jar` does not list. The generated classes therefore never reach `classes.jar`, and an app
+using the AAR dies on the first line it runs:
+
+```
+java.lang.NoClassDefFoundError: Failed resolution of: Lorg/webrtc/PeerConnectionFactoryJni;
+  at org.webrtc.PeerConnectionFactory.initialize(PeerConnectionFactory.java:328)
+```
+
+The symptom is worth recognising because nothing upstream of it complains: the build succeeds, the
+AAR packages, the artifact uploads, and the binding compiles against it. The classes are simply not
+there. It is visible in the archive itself —
+
+```
+unzip -p libwebrtc.aar classes.jar | jar -t | grep Jni.class    # empty on an unpatched build
+```
+
+`tools/add_generated_jni_to_aar.py` adds the eighteen non-test generators to the `dist_jar`, and
+the collect step then refuses to publish an archive that still lacks `PeerConnectionFactoryJni`.
+The script asserts its anchors and is idempotent; if an assertion fires, update it rather than
+skipping the step, the same rule the shared-library patch follows.
+
+M152 (`branch-heads/7977`) is the first branch this repository built where it bites.
 
 The `arch` input is space-separated ABI names. Leaving it empty builds `build_aar.py`'s own
 defaults: `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64`. The collect step lists the `.so` files
