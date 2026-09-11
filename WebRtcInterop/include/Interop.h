@@ -63,6 +63,8 @@ typedef struct rtc_peer_connection rtc_peer_connection;
 typedef struct rtc_media_track rtc_media_track;
 typedef struct rtc_data_channel rtc_data_channel;
 typedef struct rtc_rtp_sender rtc_rtp_sender;
+typedef struct rtc_rtp_transceiver rtc_rtp_transceiver;
+typedef struct rtc_rtp_receiver rtc_rtp_receiver;
 
 /* -------------------------------------------------------------------------
  *  Enumerations
@@ -107,6 +109,16 @@ typedef int32_t rtc_media_kind;
 #define RTC_MEDIA_KIND_AUDIO 0
 #define RTC_MEDIA_KIND_VIDEO 1
 
+/* W3C RTCRtpTransceiverDirection. "stopped" is reported but never accepted:
+ * setDirection cannot stop a transceiver, rtc_rtp_transceiver_stop does. */
+typedef int32_t rtc_rtp_transceiver_direction;
+
+#define RTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV 0
+#define RTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY 1
+#define RTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY 2
+#define RTC_RTP_TRANSCEIVER_DIRECTION_INACTIVE 3
+#define RTC_RTP_TRANSCEIVER_DIRECTION_STOPPED  4
+
 /* W3C enumerateDevices separates "audioinput" from "audiooutput", so the
  * audio enumeration functions take which one is wanted. */
 typedef int32_t rtc_audio_device_kind;
@@ -140,6 +152,23 @@ typedef struct {
   int32_t negotiated;           /* 0 or 1; 0 is the W3C default             */
   int32_t id;                   /* only meaningful when negotiated, else -1 */
 } rtc_data_channel_init;
+
+/* W3C RTCRtpEncodingParameters — one simulcast layer. Optional members use a
+ * sentinel rather than a pointer, for the same reason rtc_data_channel_init
+ * does: it keeps the struct blittable.
+ *
+ * rid names the layer in the SDP and is required as soon as there is more than
+ * one encoding; a single unnamed encoding is the non-simulcast case. */
+typedef struct {
+  const char* rid;                 /* nullable; required when count > 1     */
+  int32_t active;                  /* 0 or 1; 1 is the W3C default          */
+  int32_t max_bitrate;             /* bits per second, or -1 for unset      */
+  int32_t max_framerate;           /* or -1 for unset                       */
+  /* 1.0 sends at capture resolution. 0 means unset, which WebRTC treats as
+   * 1.0 — a legitimate value cannot be 0, since dividing by it is undefined. */
+  double scale_resolution_down_by;
+  const char* scalability_mode;    /* nullable, e.g. "L1T3"                 */
+} rtc_rtp_encoding;
 
 /* An I420 frame. The planes belong to WebRTC and are valid only for the
  * duration of the rtc_on_frame_fn call. Copy or convert before returning. */
@@ -324,6 +353,13 @@ RTC_API rtc_status RTC_CALL rtc_media_track_set_enabled(rtc_media_track* track,
 RTC_API rtc_status RTC_CALL rtc_media_track_get_id(rtc_media_track* track,
                                                    char** out_id);
 
+/* Audio or video. A track the caller created carries a kind it already knows;
+ * one reached through a receiver does not, having arrived through negotiation.
+ * RTC_ERR_UNSUPPORTED for a kind that is neither, which this library cannot
+ * produce. */
+RTC_API rtc_status RTC_CALL rtc_media_track_get_kind(rtc_media_track* track,
+                                                     rtc_media_kind* out_kind);
+
 RTC_API void RTC_CALL rtc_media_track_release(rtc_media_track* track);
 
 /* -------------------------------------------------------------------------
@@ -450,6 +486,111 @@ rtc_peer_connection_remove_track(rtc_peer_connection* pc,
 RTC_API void RTC_CALL rtc_rtp_sender_release(rtc_rtp_sender* sender);
 
 /* -------------------------------------------------------------------------
+ *  Transceivers
+ *
+ *  The unified-plan view of a peer connection: one transceiver per m-section,
+ *  each pairing a sender with a receiver. The peer connection is already
+ *  unified plan, so these have always existed underneath — they were simply
+ *  not exported, which left addTrack as the only way to send and made this
+ *  binding unusable by anything that negotiates per m-section. A client that
+ *  has to read a "mid", ask for specific simulcast encodings, or match an
+ *  incoming stream to the section that carries it needs these; mediasoup does
+ *  all three.
+ *
+ *  Unlike senders there IS a list function here, and it has to exist: the
+ *  interesting transceivers are the ones the REMOTE end created, which arrive
+ *  through negotiation rather than through any call the caller made. Its
+ *  ownership rule is the usual one — every handle it writes is yours, and each
+ *  needs its own release. Handles are views onto the same underlying object,
+ *  so fetching the list twice gives two sets of handles for the same
+ *  transceivers, and releasing one set does not disturb the other.
+ * ---------------------------------------------------------------------- */
+
+/* addTransceiver. Pass a track to send it, or null to add a transceiver of
+ * kind alone — which is how a client discovers what the platform can encode,
+ * by adding one of each kind and reading the offer it generates.
+ *
+ * kind is ignored when track is non-null; the track's own kind wins.
+ *
+ * stream_ids may be null, and normally is: mediasoup identifies streams by
+ * mid, not by msid. encodings may be null for a single default encoding, or
+ * point to encoding_count layers for simulcast. */
+RTC_API rtc_status RTC_CALL
+rtc_peer_connection_add_transceiver(rtc_peer_connection* pc,
+                                    rtc_media_kind kind,
+                                    rtc_media_track* track,
+                                    rtc_rtp_transceiver_direction direction,
+                                    const char* const* stream_ids,
+                                    int32_t stream_id_count,
+                                    const rtc_rtp_encoding* encodings,
+                                    int32_t encoding_count,
+                                    rtc_rtp_transceiver** out_transceiver);
+
+/* getTransceivers, as a two-call: pass a null buffer to learn the count, then
+ * a buffer of at least that size. Returns RTC_ERR_INVALID_ARG if the buffer is
+ * too small, having written nothing, so a caller that raced a renegotiation
+ * can simply ask again rather than free a half-filled array.
+ *
+ * out_count is always written when it is non-null, including on the counting
+ * call and including when the count is zero. */
+RTC_API rtc_status RTC_CALL
+rtc_peer_connection_get_transceivers(rtc_peer_connection* pc,
+                                     rtc_rtp_transceiver** buffer,
+                                     int32_t capacity,
+                                     int32_t* out_count);
+
+/* The m-section identifier this transceiver negotiated. Null until the local
+ * description that names it has been applied, which is reported as
+ * RTC_ERR_NOT_FOUND rather than as an empty string — the distinction matters,
+ * because reading it too early is the ordinary mistake here and an empty
+ * string would look like a valid answer. out_mid is caller-owned; free with
+ * rtc_string_free. */
+RTC_API rtc_status RTC_CALL
+rtc_rtp_transceiver_get_mid(rtc_rtp_transceiver* transceiver, char** out_mid);
+
+RTC_API rtc_status RTC_CALL rtc_rtp_transceiver_get_direction(
+    rtc_rtp_transceiver* transceiver,
+    rtc_rtp_transceiver_direction* out_direction);
+
+/* What the negotiation actually settled on, which is not what was asked for
+ * until an answer has been exchanged. RTC_ERR_NOT_FOUND while unset. */
+RTC_API rtc_status RTC_CALL rtc_rtp_transceiver_get_current_direction(
+    rtc_rtp_transceiver* transceiver,
+    rtc_rtp_transceiver_direction* out_direction);
+
+RTC_API rtc_status RTC_CALL rtc_rtp_transceiver_set_direction(
+    rtc_rtp_transceiver* transceiver,
+    rtc_rtp_transceiver_direction direction);
+
+/* Both hand back a new handle, which is yours to release. */
+RTC_API rtc_status RTC_CALL
+rtc_rtp_transceiver_get_sender(rtc_rtp_transceiver* transceiver,
+                               rtc_rtp_sender** out_sender);
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_transceiver_get_receiver(rtc_rtp_transceiver* transceiver,
+                                 rtc_rtp_receiver** out_receiver);
+
+/* W3C stop(). The handle stays valid and must still be released. */
+RTC_API rtc_status RTC_CALL
+rtc_rtp_transceiver_stop(rtc_rtp_transceiver* transceiver);
+
+RTC_API void RTC_CALL
+rtc_rtp_transceiver_release(rtc_rtp_transceiver* transceiver);
+
+/* -------------------------------------------------------------------------
+ *  Receivers
+ * ---------------------------------------------------------------------- */
+
+/* The remote track this receiver delivers. Present as soon as the transceiver
+ * exists, and before any media arrives. The handle is yours to release. */
+RTC_API rtc_status RTC_CALL
+rtc_rtp_receiver_get_track(rtc_rtp_receiver* receiver,
+                           rtc_media_track** out_track);
+
+RTC_API void RTC_CALL rtc_rtp_receiver_release(rtc_rtp_receiver* receiver);
+
+/* -------------------------------------------------------------------------
  *  Data channels
  *
  *  An SCTP channel alongside the media. Creating one before the offer puts an
@@ -529,6 +670,32 @@ rtc_peer_connection_get_stats(rtc_peer_connection* pc,
                               rtc_on_stats_success_fn on_success,
                               rtc_on_failure_fn on_failure,
                               void* user_data);
+
+/* The same report narrowed to one sender or one receiver — W3C getStats() on
+ * RTCRtpSender / RTCRtpReceiver. The peer connection is passed because it, not
+ * the sender, owns stats collection.
+ *
+ * These take a selector, which the connection-wide call deliberately does not:
+ * there, "the whole report" is the only sensible answer, whereas a client
+ * consuming several remote tracks needs to attribute inbound statistics to the
+ * track they belong to, and the report gives it no way to do that afterwards.
+ *
+ * RTC_ERR_INVALID_ARG if the selector does not belong to this peer
+ * connection — a mistake that would otherwise surface as a silently empty
+ * report. */
+RTC_API rtc_status RTC_CALL
+rtc_rtp_sender_get_stats(rtc_peer_connection* pc,
+                         rtc_rtp_sender* sender,
+                         rtc_on_stats_success_fn on_success,
+                         rtc_on_failure_fn on_failure,
+                         void* user_data);
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_receiver_get_stats(rtc_peer_connection* pc,
+                           rtc_rtp_receiver* receiver,
+                           rtc_on_stats_success_fn on_success,
+                           rtc_on_failure_fn on_failure,
+                           void* user_data);
 
 /* -------------------------------------------------------------------------
  *  Video frames

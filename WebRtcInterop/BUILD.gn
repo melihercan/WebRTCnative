@@ -77,6 +77,15 @@ rtc_shared_library("WebRtcInterop") {
     # PeerConnection.cc includes the stats headers directly, so depend on them
     # rather than leaning on peer_connection_interface to pull them in.
     "../api:rtc_stats_api",
+    # Transceivers, likewise included directly. rtp_parameters carries
+    # media_types.h as well as rtp_parameters.h, so one dependency covers both
+    # the MediaType enum AddTransceiver takes and the encoding parameters
+    # simulcast needs.
+    "../api:rtp_parameters",
+    "../api:rtp_receiver_interface",
+    "../api:rtp_sender_interface",
+    "../api:rtp_transceiver_direction",
+    "../api:rtp_transceiver_interface",
     "../api/video:adapted_video_track_source",
     "../api/video:video_frame",
     "../media:rtc_audio_video",

@@ -14,6 +14,8 @@
 #include "api/audio/audio_device.h"
 #include "api/data_channel_interface.h"
 #include "api/rtp_sender_interface.h"
+#include "api/rtp_receiver_interface.h"
+#include "api/rtp_transceiver_interface.h"
 #include "api/media_stream_interface.h"
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
@@ -85,6 +87,19 @@ struct rtc_media_track {
 
 struct rtc_rtp_sender {
   webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender;
+};
+
+/* Transceivers and receivers are views, not owners: the peer connection owns
+ * them, and get_transceivers hands back a fresh handle every time it is
+ * called, so several handles may refer to one object. Releasing a handle drops
+ * a reference and nothing more — it neither stops the transceiver nor
+ * invalidates any other handle onto it. */
+struct rtc_rtp_transceiver {
+  webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver;
+};
+
+struct rtc_rtp_receiver {
+  webrtc::scoped_refptr<webrtc::RtpReceiverInterface> receiver;
 };
 
 struct rtc_data_channel {

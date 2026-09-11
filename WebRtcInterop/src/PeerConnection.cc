@@ -10,11 +10,16 @@
 
 #include <memory>
 #include <new>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Internal.h"
 #include "api/jsep.h"
+#include "api/media_types.h"
+#include "api/rtp_parameters.h"
+#include "api/rtp_transceiver_direction.h"
 #include "api/rtc_error.h"
 #include "rtc_base/logging.h"
 #include "api/rtp_receiver_interface.h"
@@ -614,4 +619,402 @@ rtc_peer_connection_remove_track(rtc_peer_connection* pc,
 
 RTC_API void RTC_CALL rtc_rtp_sender_release(rtc_rtp_sender* sender) {
   delete sender;
+}
+
+/* -------------------------------------------------------------------------
+ *  Transceivers
+ * ---------------------------------------------------------------------- */
+
+namespace webrtc_interop {
+namespace {
+
+rtc_rtp_transceiver_direction ToInterop(webrtc::RtpTransceiverDirection d) {
+  switch (d) {
+    case webrtc::RtpTransceiverDirection::kSendRecv:
+      return RTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV;
+    case webrtc::RtpTransceiverDirection::kSendOnly:
+      return RTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY;
+    case webrtc::RtpTransceiverDirection::kRecvOnly:
+      return RTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY;
+    case webrtc::RtpTransceiverDirection::kInactive:
+      return RTC_RTP_TRANSCEIVER_DIRECTION_INACTIVE;
+    case webrtc::RtpTransceiverDirection::kStopped:
+      return RTC_RTP_TRANSCEIVER_DIRECTION_STOPPED;
+  }
+  return RTC_RTP_TRANSCEIVER_DIRECTION_INACTIVE;
+}
+
+/* False for anything that is not one of the four settable directions, kStopped
+ * included: a transceiver is stopped by stopping it, not by describing it as
+ * stopped, and WebRTC rejects that value anyway. */
+bool FromInterop(rtc_rtp_transceiver_direction d,
+                 webrtc::RtpTransceiverDirection* out) {
+  switch (d) {
+    case RTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV:
+      *out = webrtc::RtpTransceiverDirection::kSendRecv;
+      return true;
+    case RTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY:
+      *out = webrtc::RtpTransceiverDirection::kSendOnly;
+      return true;
+    case RTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY:
+      *out = webrtc::RtpTransceiverDirection::kRecvOnly;
+      return true;
+    case RTC_RTP_TRANSCEIVER_DIRECTION_INACTIVE:
+      *out = webrtc::RtpTransceiverDirection::kInactive;
+      return true;
+    default:
+      return false;
+  }
+}
+
+/* Wraps a transceiver WebRTC already owns. Null only on allocation failure. */
+rtc_rtp_transceiver* WrapTransceiver(
+    webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver) {
+  rtc_rtp_transceiver* handle = new (std::nothrow) rtc_rtp_transceiver();
+  if (handle != nullptr) {
+    handle->transceiver = std::move(transceiver);
+  }
+  return handle;
+}
+
+/* The optional members carry a sentinel rather than a pointer, so "unset" is
+ * decided here rather than by the caller. -1 is impossible for a bitrate or a
+ * frame rate, and 0 is impossible for a scale factor that is used as a
+ * divisor, which is why those are the sentinels. */
+webrtc::RtpEncodingParameters FromInterop(const rtc_rtp_encoding& encoding) {
+  webrtc::RtpEncodingParameters out;
+  if (encoding.rid != nullptr) {
+    out.rid = encoding.rid;
+  }
+  out.active = encoding.active != 0;
+  if (encoding.max_bitrate >= 0) {
+    out.max_bitrate_bps = encoding.max_bitrate;
+  }
+  if (encoding.max_framerate >= 0) {
+    out.max_framerate = static_cast<double>(encoding.max_framerate);
+  }
+  if (encoding.scale_resolution_down_by > 0.0) {
+    out.scale_resolution_down_by = encoding.scale_resolution_down_by;
+  }
+  if (encoding.scalability_mode != nullptr) {
+    out.scalability_mode = encoding.scalability_mode;
+  }
+  return out;
+}
+
+}  // namespace
+}  // namespace webrtc_interop
+
+RTC_API rtc_status RTC_CALL
+rtc_peer_connection_add_transceiver(rtc_peer_connection* pc,
+                                    rtc_media_kind kind,
+                                    rtc_media_track* track,
+                                    rtc_rtp_transceiver_direction direction,
+                                    const char* const* stream_ids,
+                                    int32_t stream_id_count,
+                                    const rtc_rtp_encoding* encodings,
+                                    int32_t encoding_count,
+                                    rtc_rtp_transceiver** out_transceiver) {
+  if (pc == nullptr || out_transceiver == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  if (stream_id_count < 0 || encoding_count < 0) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  if (stream_id_count > 0 && stream_ids == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  if (encoding_count > 0 && encodings == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  *out_transceiver = nullptr;
+
+  webrtc::RtpTransceiverInit init;
+  if (!webrtc_interop::FromInterop(direction, &init.direction)) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  for (int32_t i = 0; i < stream_id_count; ++i) {
+    if (stream_ids[i] == nullptr) {
+      return RTC_ERR_INVALID_ARG;
+    }
+    init.stream_ids.push_back(stream_ids[i]);
+  }
+  for (int32_t i = 0; i < encoding_count; ++i) {
+    init.send_encodings.push_back(webrtc_interop::FromInterop(encodings[i]));
+  }
+
+  webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>>
+      result = [&] {
+        if (track != nullptr) {
+          /* The track's kind decides the media type; the kind argument is
+           * ignored, as the header says. */
+          return pc->pc->AddTransceiver(track->track, init);
+        }
+        const webrtc::MediaType media_type = kind == RTC_MEDIA_KIND_AUDIO
+                                                 ? webrtc::MediaType::AUDIO
+                                                 : webrtc::MediaType::VIDEO;
+        return pc->pc->AddTransceiver(media_type, init);
+      }();
+
+  if (!result.ok()) {
+    RTC_LOG(LS_ERROR) << "add_transceiver failed: " << result.error().message();
+    /* INVALID_PARAMETER means the arguments were wrong -- a null track, or a
+     * media type that is neither audio nor video. Anything else is the peer
+     * connection refusing in its current state, most often because it is
+     * closed. Reporting the two alike would send a caller looking at its own
+     * arguments when the connection is simply gone. */
+    return result.error().type() == webrtc::RTCErrorType::INVALID_PARAMETER
+               ? RTC_ERR_INVALID_ARG
+               : RTC_ERR_INVALID_STATE;
+  }
+
+  rtc_rtp_transceiver* handle =
+      webrtc_interop::WrapTransceiver(result.MoveValue());
+  if (handle == nullptr) {
+    return RTC_ERR_INTERNAL;
+  }
+  *out_transceiver = handle;
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_peer_connection_get_transceivers(rtc_peer_connection* pc,
+                                     rtc_rtp_transceiver** buffer,
+                                     int32_t capacity,
+                                     int32_t* out_count) {
+  if (pc == nullptr || out_count == nullptr || capacity < 0) {
+    return RTC_ERR_INVALID_ARG;
+  }
+
+  std::vector<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>>
+      transceivers = pc->pc->GetTransceivers();
+  *out_count = static_cast<int32_t>(transceivers.size());
+
+  /* The counting call. */
+  if (buffer == nullptr) {
+    return RTC_OK;
+  }
+  if (capacity < *out_count) {
+    return RTC_ERR_INVALID_ARG;
+  }
+
+  /* Built into a local first, so a failure part way through frees what it
+   * allocated instead of leaving the caller a buffer that is partly handles
+   * and partly whatever was there before, with no way to tell where the
+   * boundary is. */
+  std::vector<rtc_rtp_transceiver*> handles;
+  handles.reserve(transceivers.size());
+  for (auto& transceiver : transceivers) {
+    rtc_rtp_transceiver* handle =
+        webrtc_interop::WrapTransceiver(std::move(transceiver));
+    if (handle == nullptr) {
+      for (rtc_rtp_transceiver* allocated : handles) {
+        delete allocated;
+      }
+      return RTC_ERR_INTERNAL;
+    }
+    handles.push_back(handle);
+  }
+
+  for (size_t i = 0; i < handles.size(); ++i) {
+    buffer[i] = handles[i];
+  }
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_transceiver_get_mid(rtc_rtp_transceiver* transceiver, char** out_mid) {
+  if (transceiver == nullptr || transceiver->transceiver == nullptr ||
+      out_mid == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  *out_mid = nullptr;
+
+  const std::optional<std::string> mid = transceiver->transceiver->mid();
+  if (!mid.has_value()) {
+    return RTC_ERR_NOT_FOUND;
+  }
+
+  char* copy = webrtc_interop::DuplicateString(mid->c_str());
+  if (copy == nullptr) {
+    return RTC_ERR_INTERNAL;
+  }
+  *out_mid = copy;
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL rtc_rtp_transceiver_get_direction(
+    rtc_rtp_transceiver* transceiver,
+    rtc_rtp_transceiver_direction* out_direction) {
+  if (transceiver == nullptr || transceiver->transceiver == nullptr ||
+      out_direction == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  *out_direction = webrtc_interop::ToInterop(transceiver->transceiver->direction());
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL rtc_rtp_transceiver_get_current_direction(
+    rtc_rtp_transceiver* transceiver,
+    rtc_rtp_transceiver_direction* out_direction) {
+  if (transceiver == nullptr || transceiver->transceiver == nullptr ||
+      out_direction == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  const std::optional<webrtc::RtpTransceiverDirection> current =
+      transceiver->transceiver->current_direction();
+  if (!current.has_value()) {
+    return RTC_ERR_NOT_FOUND;
+  }
+  *out_direction = webrtc_interop::ToInterop(*current);
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL rtc_rtp_transceiver_set_direction(
+    rtc_rtp_transceiver* transceiver,
+    rtc_rtp_transceiver_direction direction) {
+  if (transceiver == nullptr || transceiver->transceiver == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  webrtc::RtpTransceiverDirection value;
+  if (!webrtc_interop::FromInterop(direction, &value)) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  webrtc::RTCError error =
+      transceiver->transceiver->SetDirectionWithError(value);
+  if (!error.ok()) {
+    RTC_LOG(LS_ERROR) << "set_direction failed: " << error.message();
+    return RTC_ERR_INVALID_STATE;
+  }
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_transceiver_get_sender(rtc_rtp_transceiver* transceiver,
+                               rtc_rtp_sender** out_sender) {
+  if (transceiver == nullptr || transceiver->transceiver == nullptr ||
+      out_sender == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  *out_sender = nullptr;
+
+  rtc_rtp_sender* handle = new (std::nothrow) rtc_rtp_sender();
+  if (handle == nullptr) {
+    return RTC_ERR_INTERNAL;
+  }
+  handle->sender = transceiver->transceiver->sender();
+  *out_sender = handle;
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_transceiver_get_receiver(rtc_rtp_transceiver* transceiver,
+                                 rtc_rtp_receiver** out_receiver) {
+  if (transceiver == nullptr || transceiver->transceiver == nullptr ||
+      out_receiver == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  *out_receiver = nullptr;
+
+  rtc_rtp_receiver* handle = new (std::nothrow) rtc_rtp_receiver();
+  if (handle == nullptr) {
+    return RTC_ERR_INTERNAL;
+  }
+  handle->receiver = transceiver->transceiver->receiver();
+  *out_receiver = handle;
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_transceiver_stop(rtc_rtp_transceiver* transceiver) {
+  if (transceiver == nullptr || transceiver->transceiver == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  webrtc::RTCError error = transceiver->transceiver->StopStandard();
+  if (!error.ok()) {
+    RTC_LOG(LS_ERROR) << "transceiver stop failed: " << error.message();
+    return RTC_ERR_INVALID_STATE;
+  }
+  return RTC_OK;
+}
+
+RTC_API void RTC_CALL
+rtc_rtp_transceiver_release(rtc_rtp_transceiver* transceiver) {
+  delete transceiver;
+}
+
+/* -------------------------------------------------------------------------
+ *  Receivers
+ * ---------------------------------------------------------------------- */
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_receiver_get_track(rtc_rtp_receiver* receiver,
+                           rtc_media_track** out_track) {
+  if (receiver == nullptr || receiver->receiver == nullptr ||
+      out_track == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  *out_track = nullptr;
+
+  webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track =
+      receiver->receiver->track();
+  if (track == nullptr) {
+    return RTC_ERR_NOT_FOUND;
+  }
+
+  rtc_media_track* handle = new (std::nothrow) rtc_media_track();
+  if (handle == nullptr) {
+    return RTC_ERR_INTERNAL;
+  }
+  /* A remote track, so audio_source stays null: the source belongs to the
+   * receiver, which outlives the track handle. */
+  handle->track = std::move(track);
+  *out_track = handle;
+  return RTC_OK;
+}
+
+RTC_API void RTC_CALL rtc_rtp_receiver_release(rtc_rtp_receiver* receiver) {
+  delete receiver;
+}
+
+/* -------------------------------------------------------------------------
+ *  Per-sender and per-receiver statistics
+ * ---------------------------------------------------------------------- */
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_sender_get_stats(rtc_peer_connection* pc,
+                         rtc_rtp_sender* sender,
+                         rtc_on_stats_success_fn on_success,
+                         rtc_on_failure_fn on_failure,
+                         void* user_data) {
+  if (pc == nullptr || sender == nullptr || sender->sender == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  if (on_success == nullptr && on_failure == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  webrtc::scoped_refptr<webrtc_interop::StatsCollector> collector(
+      new webrtc::RefCountedObject<webrtc_interop::StatsCollector>(
+          on_success, on_failure, user_data));
+  pc->pc->GetStats(sender->sender, collector);
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_receiver_get_stats(rtc_peer_connection* pc,
+                           rtc_rtp_receiver* receiver,
+                           rtc_on_stats_success_fn on_success,
+                           rtc_on_failure_fn on_failure,
+                           void* user_data) {
+  if (pc == nullptr || receiver == nullptr || receiver->receiver == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  if (on_success == nullptr && on_failure == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  webrtc::scoped_refptr<webrtc_interop::StatsCollector> collector(
+      new webrtc::RefCountedObject<webrtc_interop::StatsCollector>(
+          on_success, on_failure, user_data));
+  pc->pc->GetStats(receiver->receiver, collector);
+  return RTC_OK;
 }

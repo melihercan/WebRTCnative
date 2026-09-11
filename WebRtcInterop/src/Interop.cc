@@ -548,6 +548,31 @@ RTC_API rtc_status RTC_CALL rtc_media_track_get_id(rtc_media_track* track,
   return RTC_OK;
 }
 
+RTC_API rtc_status RTC_CALL rtc_media_track_get_kind(rtc_media_track* track,
+                                                     rtc_media_kind* out_kind) {
+  if (track == nullptr || out_kind == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  /* WebRTC reports the kind as one of two fixed strings rather than as an
+   * enum. Anything else would be a track this library did not create, so
+   * report the mismatch rather than guessing a kind for it.
+   *
+   * Only tracks the caller created itself carry a kind it already knows. A
+   * track reached through a receiver does not: it arrived through negotiation,
+   * and until now the only way to learn its kind was the on_track callback
+   * that announced it. */
+  const std::string kind = track->track->kind();
+  if (kind == webrtc::MediaStreamTrackInterface::kAudioKind) {
+    *out_kind = RTC_MEDIA_KIND_AUDIO;
+    return RTC_OK;
+  }
+  if (kind == webrtc::MediaStreamTrackInterface::kVideoKind) {
+    *out_kind = RTC_MEDIA_KIND_VIDEO;
+    return RTC_OK;
+  }
+  return RTC_ERR_UNSUPPORTED;
+}
+
 RTC_API void RTC_CALL rtc_media_track_release(rtc_media_track* track) {
   delete track;
 }
