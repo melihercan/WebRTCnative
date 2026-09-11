@@ -733,15 +733,22 @@ rtc_peer_connection_add_transceiver(rtc_peer_connection* pc,
   if (!webrtc_interop::FromInterop(direction, &init.direction)) {
     return RTC_ERR_INVALID_ARG;
   }
+  /* Chromium builds with -Wunsafe-buffer-usage. A C ABI necessarily takes an
+   * array as pointer plus count, and both counts are validated above, so the
+   * suppression is scoped to these accesses rather than to the target. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
   for (int32_t i = 0; i < stream_id_count; ++i) {
-    if (stream_ids[i] == nullptr) {
+    const char* stream_id = stream_ids[i];
+    if (stream_id == nullptr) {
       return RTC_ERR_INVALID_ARG;
     }
-    init.stream_ids.push_back(stream_ids[i]);
+    init.stream_ids.push_back(stream_id);
   }
   for (int32_t i = 0; i < encoding_count; ++i) {
     init.send_encodings.push_back(webrtc_interop::FromInterop(encodings[i]));
   }
+#pragma clang diagnostic pop
 
   webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>>
       result = [&] {
@@ -816,9 +823,14 @@ rtc_peer_connection_get_transceivers(rtc_peer_connection* pc,
     handles.push_back(handle);
   }
 
+  /* Same as above: the caller's buffer is a pointer plus a capacity, and the
+   * capacity was checked against the count before anything was allocated. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
   for (size_t i = 0; i < handles.size(); ++i) {
     buffer[i] = handles[i];
   }
+#pragma clang diagnostic pop
   return RTC_OK;
 }
 
