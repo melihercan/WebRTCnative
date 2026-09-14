@@ -141,7 +141,28 @@ def branch_exists(branch: str) -> bool:
         # Do not block the build on a flaky network probe.
         print(f"::warning::Could not verify branch-heads/{branch}: {error}", file=sys.stderr)
         return True
-    return result.returncode == 0 and bool(result.stdout.strip())
+
+    # A non-zero exit is the probe failing, not an answer about the branch. git ls-remote runs
+    # perfectly well and exits 128 when the server refuses it, which is neither an OSError nor a
+    # TimeoutExpired, so it used to fall through to the check below and be reported as "the branch
+    # does not exist".
+    #
+    # Not theoretical: on 2026-09-14 googlesource was serving intermittent 502s and a build was
+    # failed with "refs/branch-heads/7977 does not exist in the WebRTC repository" for a ref that
+    # did exist - the same one the previous build had used an hour earlier, and which ls-remote
+    # returned normally when asked again a minute later.
+    #
+    # Same reasoning as the except above, and the same answer: a probe that could not run must not
+    # block the build. The clone that follows gives a truthful error if the ref really is missing.
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip().splitlines()
+        print(f"::warning::Could not verify branch-heads/{branch} "
+              f"(git ls-remote exited {result.returncode}): "
+              f"{detail[-1] if detail else 'no output'}", file=sys.stderr)
+        return True
+
+    # Exit 0 with nothing on stdout is a real answer: the ref is not there.
+    return bool(result.stdout.strip())
 
 
 def emit(name: str, value: str, path_variable: str) -> None:
