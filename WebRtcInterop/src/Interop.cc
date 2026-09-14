@@ -1,9 +1,12 @@
 /*
  *  WebRtcInterop — implementation of include/Interop.h.
  *
- *  Implemented so far: library lifecycle, the peer connection factory, video
- *  device enumeration, and audio and video track creation. Audio device
- *  enumeration is stubbed; see rtc_audio_device_count for why.
+ *  Implemented so far: library lifecycle, the peer connection factory, audio
+ *  and video device enumeration, and audio and video track creation.
+ *
+ *  Audio enumeration was stubbed once and this comment went on saying so long
+ *  after it was not. It is real, and it carries one workaround: see
+ *  CountAudioDevices for the module that stops answering after a call.
  *
  *  Two invariants hold everywhere in this file:
  *
@@ -360,6 +363,41 @@ RTC_API rtc_status RTC_CALL rtc_video_device_info(rtc_factory* factory,
   return RTC_OK;
 }
 
+/* Counts audio devices of one kind, reviving the module if it has been shut
+ * down underneath us.
+ *
+ * AudioDeviceModuleImpl guards its entry points with CHECKinitialized_, which
+ * returns -1 once the module has been terminated. Something in a peer
+ * connection's lifetime terminates it: measured on Windows 2026-09-14,
+ * enumeration returns eight devices before a call and fails for the rest of the
+ * process afterwards. The call that provokes it carries no audio track at all -
+ * a data channel is enough - so it is not the audio path being used and then
+ * released.
+ *
+ * Init() returns 0 without doing anything when the module is already up, so the
+ * retry costs one virtual call in the ordinary case and restores enumeration in
+ * the broken one. This treats the symptom rather than the cause, deliberately:
+ * whatever terminates the module is inside libwebrtc's own teardown, and a
+ * caller asking which devices exist deserves an answer either way.
+ *
+ * Must be called on the worker thread - the module has thread affinity. */
+static int16_t CountAudioDevices(webrtc::AudioDeviceModule* adm,
+                                 rtc_audio_device_kind kind) {
+  const auto count = [adm, kind]() -> int16_t {
+    return kind == RTC_AUDIO_DEVICE_RECORDING ? adm->RecordingDevices()
+                                              : adm->PlayoutDevices();
+  };
+
+  const int16_t first = count();
+  if (first >= 0) {
+    return first;
+  }
+  if (adm->Init() != 0) {
+    return -1;
+  }
+  return count();
+}
+
 RTC_API rtc_status RTC_CALL rtc_audio_device_count(rtc_factory* factory,
                                                    rtc_audio_device_kind kind,
                                                    int32_t* out_count) {
@@ -379,10 +417,8 @@ RTC_API rtc_status RTC_CALL rtc_audio_device_count(rtc_factory* factory,
 
   /* The module has thread affinity to the worker thread. */
   webrtc::AudioDeviceModule* adm = factory->adm.get();
-  const int16_t count = g_runtime->worker_thread->BlockingCall([adm, kind] {
-    return kind == RTC_AUDIO_DEVICE_RECORDING ? adm->RecordingDevices()
-                                              : adm->PlayoutDevices();
-  });
+  const int16_t count = g_runtime->worker_thread->BlockingCall(
+      [adm, kind] { return CountAudioDevices(adm, kind); });
   if (count < 0) {
     return RTC_ERR_INTERNAL;
   }
@@ -416,13 +452,21 @@ RTC_API rtc_status RTC_CALL rtc_audio_device_info(rtc_factory* factory,
   webrtc::AudioDeviceModule* adm = factory->adm.get();
   const int32_t result =
       g_runtime->worker_thread->BlockingCall([adm, kind, index, &name, &guid] {
-        const uint16_t i = static_cast<uint16_t>(index);
-        const int16_t count = kind == RTC_AUDIO_DEVICE_RECORDING
-                                  ? adm->RecordingDevices()
-                                  : adm->PlayoutDevices();
-        if (count < 0 || index >= count) {
+        /* Counted through the same helper as rtc_audio_device_count, so a
+         * module that has been terminated is revived here too. */
+        const int16_t count = CountAudioDevices(adm, kind);
+
+        /* A module that cannot be revived is an internal fault, not an index
+         * nobody has. These used to share a branch, so a caller iterating the
+         * devices it had just been told about was told they did not exist. */
+        if (count < 0) {
+          return -1;
+        }
+        if (index >= count) {
           return 1; /* out of range, distinguished below */
         }
+
+        const uint16_t i = static_cast<uint16_t>(index);
         return kind == RTC_AUDIO_DEVICE_RECORDING
                    ? adm->RecordingDeviceName(i, name, guid)
                    : adm->PlayoutDeviceName(i, name, guid);
