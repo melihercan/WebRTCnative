@@ -170,8 +170,25 @@ typedef struct {
   const char* scalability_mode;    /* nullable, e.g. "L1T3"                 */
 } rtc_rtp_encoding;
 
+/* Clockwise degrees a renderer must turn the frame by before showing it.
+ * The values are webrtc::VideoRotation's own, so the cast is an identity. */
+typedef enum {
+  RTC_VIDEO_ROTATION_0 = 0,
+  RTC_VIDEO_ROTATION_90 = 90,
+  RTC_VIDEO_ROTATION_180 = 180,
+  RTC_VIDEO_ROTATION_270 = 270
+} rtc_video_rotation;
+
 /* An I420 frame. The planes belong to WebRTC and are valid only for the
- * duration of the rtc_on_frame_fn call. Copy or convert before returning. */
+ * duration of the rtc_on_frame_fn call. Copy or convert before returning.
+ *
+ * width and height describe the buffer, not the picture: a phone in portrait
+ * sends 640x480 with rotation 90, and what a viewer should see is 480x640.
+ * A consumer that ignores rotation therefore shows every phone on its side
+ * and cannot detect the mistake, because the two cases are the same bytes at
+ * the same dimensions. That is exactly what happened on Windows until
+ * 2026-09-14: this struct carried no rotation, so the managed renderer had
+ * nothing to apply. */
 typedef struct {
   const uint8_t* y;
   const uint8_t* u;
@@ -182,6 +199,7 @@ typedef struct {
   int32_t width;
   int32_t height;
   int64_t timestamp_us;
+  rtc_video_rotation rotation;
 } rtc_video_frame;
 
 /* -------------------------------------------------------------------------

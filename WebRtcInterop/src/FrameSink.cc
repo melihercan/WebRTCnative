@@ -56,6 +56,11 @@ class FrameSink : public webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     out.width = i420->width();
     out.height = i420->height();
     out.timestamp_us = frame.timestamp_us();
+    /* Carried, not applied. Rotating here would cost a copy on every frame for
+     * every consumer, including those that can hand the angle to a compositor
+     * and get it free. The values match webrtc::VideoRotation, so this is a
+     * cast rather than a mapping. */
+    out.rotation = static_cast<rtc_video_rotation>(frame.rotation());
 
     on_frame_(user_data_, &out);
   }
