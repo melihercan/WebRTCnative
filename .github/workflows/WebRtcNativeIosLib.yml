@@ -28,6 +28,11 @@ on:
         default: 'release'
         type: choice
         options: ['release', 'debug']
+      dsyms:
+        description: 'Also produce dSYMs, so a crash report from this framework can be symbolicated.'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -86,13 +91,38 @@ jobs:
         env:
           ARCH: ${{ inputs.arch }}
           BUILD_CONFIG: ${{ inputs.build_config || 'release' }}
+          DSYMS: ${{ inputs.dsyms }}
         run: |
           set -euxo pipefail
           cd "$HOME/webrtc-checkout/src"
+
+          # A release build carries no debug information, so a crash inside the
+          # shipped framework symbolicates to nothing: `nm` finds thirteen text
+          # symbols, all RTCLog*, and a faulting stack is eight bare addresses.
+          # That cost a full night of guesswork on WebRTCme's Apple crash in
+          # September 2026, where the fault lands on a libwebrtc-internal thread
+          # with no managed frame near it and the addresses were all there was.
+          #
+          # enable_dsyms puts the debug information in a separate bundle and
+          # leaves the linked binary alone, so the framework this produces is
+          # still the framework that ships -- unlike build_config=debug, which
+          # changes both the code and its timing, and timing is exactly what a
+          # racy fault is sensitive to.
+          #
+          # One --extra-gn-args taking both values, and last on the line:
+          # build_ios_libs.py declares it nargs='*', so a second one would
+          # replace the first rather than add to it, and it swallows whatever
+          # follows.
+          extra_args=''
+          if [ "${DSYMS}" = 'true' ]; then
+            extra_args='--extra-gn-args enable_dsyms=true symbol_level=2'
+          fi
+
           # shellcheck disable=SC2086
           ./tools_webrtc/ios/build_ios_libs.py \
             --build_config "${BUILD_CONFIG}" \
-            --arch ${ARCH}
+            --arch ${ARCH} \
+            ${extra_args}
           ls -l out_ios_libs
 
       - name: Package the xcframework
@@ -121,4 +151,34 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           # The zip is already compressed; recompressing it only wastes time.
+          compression-level: 0
+
+      - name: Package the dSYMs
+        if: inputs.dsyms
+        run: |
+          set -euo pipefail
+          cd "$HOME/webrtc-checkout/src"
+          # One bundle per slice, beside that slice's build directory. The
+          # layout under out_ios_libs has been renamed upstream before, so this
+          # searches for the bundles rather than naming their paths.
+          if [ -z "$(find out_ios_libs -maxdepth 4 -name '*.dSYM' -print)" ]; then
+            echo "::error::dSYMs were requested but the build produced none."
+            exit 1
+          fi
+          find out_ios_libs -maxdepth 4 -name '*.dSYM' -print
+          # -y for the same reason as the framework: a dSYM is a bundle, and
+          # dereferencing its symlinks would corrupt it.
+          find out_ios_libs -maxdepth 4 -name '*.dSYM' -print0 |
+            xargs -0 zip -qry "$GITHUB_WORKSPACE/WebRTC.dSYMs.zip"
+          ls -lh "$GITHUB_WORKSPACE/WebRTC.dSYMs.zip"
+
+      - name: Upload the dSYMs
+        if: inputs.dsyms
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-ios-dsyms-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
+          path: WebRTC.dSYMs.zip
+          if-no-files-found: error
+          retention-days: 30
+          # Already compressed, like the framework zip beside it.
           compression-level: 0

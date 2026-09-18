@@ -180,6 +180,26 @@ xcframework that loses its symlinks will not link. The zip is created from insid
 so `WebRTC.xcframework` sits at the archive root, and uploaded with `compression-level: 0` because
 it is already compressed.
 
+### Symbols, and the `dsyms` input
+
+A release build carries no debug information, so a crash inside the shipped framework symbolicates
+to nothing: `nm` finds thirteen text symbols, all `RTCLog*`, and a faulting stack is eight bare
+addresses that `atos` cannot resolve. That is fine until something crashes on a libwebrtc-internal
+thread, where the addresses are the only evidence there is — WebRTCme spent a night in September
+2026 bisecting an Apple crash that a symbol table would have named.
+
+Setting `dsyms: true` adds `--extra-gn-args enable_dsyms=true symbol_level=2` and uploads the
+bundles as a second artifact, `webrtc-<platform>-dsyms-m<milestone>-<branch>`.
+
+> **Prefer this over `build_config: debug` for diagnosing a crash.** `enable_dsyms` puts the debug
+> information in a separate bundle and leaves the linked binary alone, so the framework is still
+> the framework that ships. A debug build changes both the code and its timing, and a racy fault is
+> exactly what timing perturbs — it may stop reproducing.
+
+The flag is off by default, so an ordinary refresh produces the same artifact it always did. Note
+that `--extra-gn-args` is declared `nargs='*'` upstream: it takes both values at once and must come
+last, because a second occurrence replaces the first rather than adding to it.
+
 ## The interop workflow is different in kind
 
 `WebRtcNativeInteropWindows` is the only workflow that builds code from **this** repository.
