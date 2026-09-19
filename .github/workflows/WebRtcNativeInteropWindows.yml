@@ -168,6 +168,61 @@ jobs:
           (Get-Content BUILD.gn).replace('deps = [ ":webrtc" ]', 'deps = [ ":webrtc", "//WebRtcInterop" ]') | Set-Content BUILD.gn
           Assert-Match 'BUILD.gn' '"//WebRtcInterop"' 'the grafted interop dependency'
 
+      - name: Use the Windows SDK the runner actually has
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location (Join-Path $env:CHECKOUT_DIR 'src')
+
+          # Chromium pins an exact Windows SDK and passes it to vcvarsall, so a
+          # machine without that precise version dies in gn gen before a single
+          # source file is read:
+          #
+          #   Exception: Path "...\Windows Kits\10\include\10.0.28000.0\um"
+          #   from environment variable "include" does not exist.
+          #
+          # M153 moved to the VS 2026 toolchain and asks for 10.0.28000.0;
+          # windows-latest ships 10.0.26100.0. Installing a multi-gigabyte SDK
+          # onto a runner with a few gigabytes free is not an option, and 26100
+          # is what every green build here has used, so point the checkout at
+          # it instead.
+          $includeRoot = 'C:\Program Files (x86)\Windows Kits\10\Include'
+          if (-not (Test-Path $includeRoot)) { throw "no Windows SDK at $includeRoot" }
+
+          # Newest installed wins, and it must actually carry the headers -- an
+          # empty version directory is exactly the trap being worked around.
+          $sdk = Get-ChildItem $includeRoot -Directory |
+                 Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and
+                                (Test-Path (Join-Path $_.FullName 'um')) } |
+                 Sort-Object { [version]$_.Name } |
+                 Select-Object -Last 1
+          if (-not $sdk) { throw "no usable Windows SDK under $includeRoot" }
+          Write-Host "installed SDKs:"
+          Get-ChildItem $includeRoot -Directory | ForEach-Object {
+            $has = if (Test-Path (Join-Path $_.FullName 'um')) { 'headers' } else { 'EMPTY' }
+            Write-Host ("  {0,-16} {1}" -f $_.Name, $has)
+          }
+          Write-Host "using $($sdk.Name)"
+
+          # Both files, because they have to agree -- vs_toolchain.py validates
+          # the SDK and setup_toolchain.py is what hands it to vcvarsall.
+          foreach ($file in 'build/vs_toolchain.py', 'build/toolchain/win/setup_toolchain.py') {
+            $text = Get-Content $file -Raw
+            if ($text -notmatch "(?m)^SDK_VERSION = '([\d.]+)'") {
+              throw "$file no longer defines SDK_VERSION at the start of a line. " +
+                    "Update this patch rather than deleting it: without it, gn gen " +
+                    "fails on any runner whose SDK differs from Chromium's pin."
+            }
+            $pinned = $Matches[1]
+            if ($pinned -eq $sdk.Name) {
+              Write-Host "  $file already asks for $pinned"
+              continue
+            }
+            $text = $text -replace "(?m)^SDK_VERSION = '[\d.]+'", "SDK_VERSION = '$($sdk.Name)'"
+            Set-Content -Path $file -Value $text -NoNewline
+            Write-Host "  $file : $pinned -> $($sdk.Name)"
+          }
+
       - name: Build
         shell: pwsh
         env:
