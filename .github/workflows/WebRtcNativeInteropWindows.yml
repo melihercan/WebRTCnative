@@ -188,7 +188,16 @@ jobs:
             'rtc_enable_symbol_export = true',
             'rtc_include_tests = false',
             'rtc_build_tools = false',
-            'rtc_build_examples = false'
+            'rtc_build_examples = false',
+            # is_debug = false does NOT reduce debug info: symbol_level defaults
+            # to 2, so a component build writes a PDB beside every one of ~4700
+            # targets. That filled the runner's disk and the build died in the
+            # final link with "LLVM ERROR: IO failure on output stream: no space
+            # on device" -- after 25 minutes of successful compilation, which is
+            # a slow way to find out. Nothing consumes these: WebRTCme ships the
+            # DLLs alone. 1 keeps line tables, so a crash address is still
+            # resolvable, at a fraction of the size.
+            'symbol_level = 1'
           )
           Set-Content -Path out/Default/args.gn -Value $gnArgs -Encoding utf8
           Write-Host '--- args.gn ---'
@@ -198,8 +207,20 @@ jobs:
           gn gen out/Default
           if ($LASTEXITCODE -ne 0) { throw "gn gen failed with exit code $LASTEXITCODE" }
 
+          # Reported either side of the build because running out of disk shows
+          # up as a linker crash with nothing to say it was about space, and the
+          # log is the only place to look afterwards.
+          function Show-Disk($when) {
+            $c = Get-PSDrive C
+            Write-Host ("disk {0}: {1:N1} GB free of {2:N1} GB" -f $when,
+                        ($c.Free / 1GB), (($c.Free + $c.Used) / 1GB))
+          }
+          Show-Disk 'before the build'
+
           autoninja -C out/Default WebRtcInterop
-          if ($LASTEXITCODE -ne 0) { throw "autoninja failed with exit code $LASTEXITCODE" }
+          $buildExit = $LASTEXITCODE
+          Show-Disk 'after the build'
+          if ($buildExit -ne 0) { throw "autoninja failed with exit code $buildExit" }
 
       - name: Collect WebRtcInterop.dll
         shell: pwsh
