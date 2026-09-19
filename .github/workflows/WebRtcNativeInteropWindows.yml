@@ -103,6 +103,75 @@ jobs:
           git config --global core.filemode false
           git config --global branch.autosetuprebase always
 
+      - name: Free disk space
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+
+          # The image leaves about three gigabytes free once the WebRTC
+          # checkout has landed, which is not enough to also install an SDK and
+          # then link. None of this is used by a WebRTC build.
+          function Show-Disk($when) {
+            $c = Get-PSDrive C
+            Write-Host ("disk {0}: {1:N1} GB free of {2:N1} GB" -f $when,
+                        ($c.Free / 1GB), (($c.Free + $c.Used) / 1GB))
+          }
+          Show-Disk 'before cleanup'
+
+          # Android SDK/NDK and the hosted tool cache are the two big ones. The
+          # runner's own node lives in C:\actions-runner\externals, not here,
+          # so later actions still work.
+          foreach ($path in 'C:\Android', 'C:\hostedtoolcache\windows',
+                            'C:\Program Files\Microsoft SQL Server',
+                            'C:\Program Files (x86)\Microsoft SQL Server') {
+            if (Test-Path $path) {
+              $gb = (Get-ChildItem $path -Recurse -File -ErrorAction SilentlyContinue |
+                     Measure-Object Length -Sum).Sum / 1GB
+              Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host ("  removed {0,-45} {1:N1} GB" -f $path, $gb)
+            }
+          }
+          Show-Disk 'after cleanup'
+
+      - name: Install the Windows SDK Chromium pins
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # 10.0.28000.2270, June 2026 -- the build vs_toolchain.py names as the
+          # one its packaged toolchain carries. Deliberately not the newest:
+          # matching what Chromium says it was tested against is the point, and
+          # every 28000 servicing build installs into the same
+          # Include\10.0.28000.0 directory that SDK_VERSION refers to.
+          $url = 'https://go.microsoft.com/fwlink/?linkid=2370315'
+          $exe = Join-Path $env:RUNNER_TEMP 'winsdksetup.exe'
+
+          Write-Host "downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
+          Write-Host ("  {0:N1} MB" -f ((Get-Item $exe).Length / 1MB))
+
+          # Headers and libs for both architectures: setup_toolchain.py builds
+          # an environment for x86 as well as x64, even for an x64-only build.
+          $features = @(
+            'OptionId.DesktopCPPx64',
+            'OptionId.DesktopCPPx86',
+            'OptionId.WindowsDesktopDebuggers'
+          )
+          $sdkArgs = @('/quiet', '/norestart', '/features') + $features
+          Write-Host "winsdksetup $($sdkArgs -join ' ')"
+          $p = Start-Process -FilePath $exe -ArgumentList $sdkArgs -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            throw "winsdksetup failed with exit code $($p.ExitCode)"
+          }
+
+          $root = 'C:\Program Files (x86)\Windows Kits\10\Include'
+          Write-Host 'SDKs now present:'
+          Get-ChildItem $root -Directory | ForEach-Object {
+            $has = if (Test-Path (Join-Path $_.FullName 'um')) { 'headers' } else { 'EMPTY' }
+            Write-Host ("  {0,-16} {1}" -f $_.Name, $has)
+          }
+          Remove-Item $exe -Force -ErrorAction SilentlyContinue
+
       - name: Fetch WebRTC source
         shell: pwsh
         env:
@@ -168,60 +237,42 @@ jobs:
           (Get-Content BUILD.gn).replace('deps = [ ":webrtc" ]', 'deps = [ ":webrtc", "//WebRtcInterop" ]') | Set-Content BUILD.gn
           Assert-Match 'BUILD.gn' '"//WebRtcInterop"' 'the grafted interop dependency'
 
-      - name: Use the Windows SDK the runner actually has
+      - name: Confirm the Windows SDK Chromium pins is installed
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Set-Location (Join-Path $env:CHECKOUT_DIR 'src')
 
-          # Chromium pins an exact Windows SDK and passes it to vcvarsall, so a
-          # machine without that precise version dies in gn gen before a single
-          # source file is read:
-          #
-          #   Exception: Path "...\Windows Kits\10\include\10.0.28000.0\um"
-          #   from environment variable "include" does not exist.
-          #
-          # M153 moved to the VS 2026 toolchain and asks for 10.0.28000.0;
-          # windows-latest ships 10.0.26100.0. Installing a multi-gigabyte SDK
-          # onto a runner with a few gigabytes free is not an option, and 26100
-          # is what every green build here has used, so point the checkout at
-          # it instead.
-          $includeRoot = 'C:\Program Files (x86)\Windows Kits\10\Include'
-          if (-not (Test-Path $includeRoot)) { throw "no Windows SDK at $includeRoot" }
-
-          # Newest installed wins, and it must actually carry the headers -- an
-          # empty version directory is exactly the trap being worked around.
-          $sdk = Get-ChildItem $includeRoot -Directory |
-                 Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and
-                                (Test-Path (Join-Path $_.FullName 'um')) } |
-                 Sort-Object { [version]$_.Name } |
-                 Select-Object -Last 1
-          if (-not $sdk) { throw "no usable Windows SDK under $includeRoot" }
-          Write-Host "installed SDKs:"
-          Get-ChildItem $includeRoot -Directory | ForEach-Object {
-            $has = if (Test-Path (Join-Path $_.FullName 'um')) { 'headers' } else { 'EMPTY' }
-            Write-Host ("  {0,-16} {1}" -f $_.Name, $has)
-          }
-          Write-Host "using $($sdk.Name)"
-
-          # Both files, because they have to agree -- vs_toolchain.py validates
-          # the SDK and setup_toolchain.py is what hands it to vcvarsall.
+          # Chromium pins an exact Windows SDK in two files that must agree, and
+          # hands it to vcvarsall. Read the pin rather than assuming it, so a
+          # milestone that moves the pin fails here with the version it wants
+          # rather than deep in a compile.
+          $pins = @{}
           foreach ($file in 'build/vs_toolchain.py', 'build/toolchain/win/setup_toolchain.py') {
             $text = Get-Content $file -Raw
             if ($text -notmatch "(?m)^SDK_VERSION = '([\d.]+)'") {
-              throw "$file no longer defines SDK_VERSION at the start of a line. " +
-                    "Update this patch rather than deleting it: without it, gn gen " +
-                    "fails on any runner whose SDK differs from Chromium's pin."
+              throw "$file no longer declares SDK_VERSION at the start of a line. " +
+                    "Update this check rather than deleting it."
             }
-            $pinned = $Matches[1]
-            if ($pinned -eq $sdk.Name) {
-              Write-Host "  $file already asks for $pinned"
-              continue
-            }
-            $text = $text -replace "(?m)^SDK_VERSION = '[\d.]+'", "SDK_VERSION = '$($sdk.Name)'"
-            Set-Content -Path $file -Value $text -NoNewline
-            Write-Host "  $file : $pinned -> $($sdk.Name)"
+            $pins[$file] = $Matches[1]
           }
+          $wanted = $pins.Values | Select-Object -Unique
+          if ($wanted.Count -ne 1) {
+            throw "the two SDK pins disagree: $($pins | Out-String)"
+          }
+          $wanted = $wanted[0]
+          Write-Host "Chromium pins Windows SDK $wanted"
+
+          # Do not be tempted to point the checkout at an older SDK instead.
+          # That gets past gn gen and then fails compiling libvpx with
+          # "unknown type name 'FILE_INFO_BY_HANDLE_CLASS'", because the pin is
+          # a real dependency rather than a version-string preference.
+          $inc = "C:\Program Files (x86)\Windows Kits\10\Include\$wanted\um\fileapi.h"
+          if (-not (Test-Path $inc)) {
+            throw "Windows SDK $wanted is not installed -- expected $inc. " +
+                  "The install step above should have provided it."
+          }
+          Write-Host "found $inc"
 
       - name: Build
         shell: pwsh
