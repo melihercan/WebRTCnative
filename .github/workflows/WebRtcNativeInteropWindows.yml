@@ -150,19 +150,17 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
           Write-Host ("  {0:N1} MB" -f ((Get-Item $exe).Length / 1MB))
 
-          # Headers and libs for both architectures: setup_toolchain.py builds
-          # an environment for x86 as well as x64, even for an x64-only build.
-          $features = @(
-            'OptionId.DesktopCPPx64',
-            'OptionId.DesktopCPPx86',
-            'OptionId.WindowsDesktopDebuggers'
-          )
-          $sdkArgs = @('/quiet', '/norestart', '/features') + $features
+          # '/features +' means everything, and it is deliberate. Naming
+          # OptionId.DesktopCPPx64 and friends installed NOTHING and still
+          # exited 0 -- winsdksetup treats an unrecognised feature id as a
+          # no-op rather than an error, so the build only discovered it much
+          # later. Everything costs a few gigabytes we have after the cleanup
+          # above, and cannot be silently wrong.
+          $log = Join-Path $env:RUNNER_TEMP 'winsdk-install.log'
+          $sdkArgs = @('/quiet', '/norestart', '/log', $log, '/features', '+')
           Write-Host "winsdksetup $($sdkArgs -join ' ')"
           $p = Start-Process -FilePath $exe -ArgumentList $sdkArgs -Wait -PassThru
-          if ($p.ExitCode -ne 0) {
-            throw "winsdksetup failed with exit code $($p.ExitCode)"
-          }
+          Write-Host "exit code $($p.ExitCode)"
 
           $root = 'C:\Program Files (x86)\Windows Kits\10\Include'
           Write-Host 'SDKs now present:'
@@ -170,6 +168,20 @@ jobs:
             $has = if (Test-Path (Join-Path $_.FullName 'um')) { 'headers' } else { 'EMPTY' }
             Write-Host ("  {0,-16} {1}" -f $_.Name, $has)
           }
+
+          # Assert rather than report. The version is the one the fwlink above
+          # points at; the step after the fetch cross-checks it against the pin
+          # Chromium actually declares, which is the authority.
+          $expected = '10.0.28000.0'
+          $header = Join-Path $root "$expected\um\fileapi.h"
+          if (-not (Test-Path $header)) {
+            Write-Host '--- winsdksetup log (tail) ---'
+            if (Test-Path $log) { Get-Content $log -Tail 40 | ForEach-Object { Write-Host "  $_" } }
+            else { Write-Host '  (no log written)' }
+            throw "winsdksetup exited $($p.ExitCode) but $header is missing, so " +
+                  "nothing was installed. Check the feature ids and the download link."
+          }
+          Write-Host "installed: $header"
           Remove-Item $exe -Force -ErrorAction SilentlyContinue
 
       - name: Fetch WebRTC source
@@ -256,7 +268,10 @@ jobs:
             }
             $pins[$file] = $Matches[1]
           }
-          $wanted = $pins.Values | Select-Object -Unique
+          # @() on purpose: a pipeline yielding one value gives a scalar string,
+          # and $wanted[0] on a string is its first CHARACTER -- which is how
+          # this once went looking for a Windows SDK called "1".
+          $wanted = @($pins.Values | Select-Object -Unique)
           if ($wanted.Count -ne 1) {
             throw "the two SDK pins disagree: $($pins | Out-String)"
           }
@@ -269,6 +284,9 @@ jobs:
           # a real dependency rather than a version-string preference.
           $inc = "C:\Program Files (x86)\Windows Kits\10\Include\$wanted\um\fileapi.h"
           if (-not (Test-Path $inc)) {
+            Write-Host 'installed SDKs:'
+            Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Directory |
+              ForEach-Object { Write-Host "  $($_.Name)" }
             throw "Windows SDK $wanted is not installed -- expected $inc. " +
                   "The install step above should have provided it."
           }
