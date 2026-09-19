@@ -496,6 +496,55 @@ rtc_peer_connection_add_track(rtc_peer_connection* pc,
 RTC_API rtc_status RTC_CALL
 rtc_rtp_sender_replace_track(rtc_rtp_sender* sender, rtc_media_track* track);
 
+/* W3C getParameters / setParameters, narrowed to the encodings, which are the
+ * part a caller can change.
+ *
+ * The transaction deliberately does not cross the ABI. WebRTC rejects a
+ * setParameters whose argument did not come from a recent getParameters on the
+ * same sender -- the parameters carry a transaction id, and a stale one fails
+ * at run time with InvalidModification, not at compile time -- so
+ * set_parameters does its own get, applies the fields below, and sets the
+ * result back. The caller therefore never holds a token it has to keep fresh.
+ *
+ * Only these encoding fields are written by a set: active, max_bitrate,
+ * max_framerate, scale_resolution_down_by and scalability_mode. rid is left as
+ * negotiation settled it, because WebRTC rejects a change to it, and
+ * everything else an encoding carries is read-only.
+ *
+ * Note which side enforces what, because it is not uniform and the difference
+ * is visible in the stats. max_bitrate is enforced by the encoder.
+ * scale_resolution_down_by is enforced by the encoder too -- it scales a frame
+ * that does not match the configured resolution -- so the picture shrinks even
+ * for a source that ignores adaptation, which is why outbound-rtp frameWidth
+ * is no evidence about the source. max_framerate is the one the SOURCE's frame
+ * adapter has to apply: measured on M152, a source that does not call
+ * AdaptFrame keeps delivering at capture rate and the request is simply lost.
+ * This library's camera and desktop sources do call it.
+ */
+
+/* Two-call, like get_transceivers: pass a null buffer to learn the count, then
+ * a buffer of at least that size. Returns RTC_ERR_INVALID_ARG if the buffer is
+ * too small, having written nothing.
+ *
+ * rid and scalability_mode are caller-owned on return and null when unset:
+ * free each non-null one with rtc_string_free. The numeric fields use the
+ * sentinels rtc_rtp_encoding documents, so what comes out of a get can be fed
+ * straight back into a set. */
+RTC_API rtc_status RTC_CALL
+rtc_rtp_sender_get_parameters(rtc_rtp_sender* sender,
+                              rtc_rtp_encoding* buffer,
+                              int32_t capacity,
+                              int32_t* out_count);
+
+/* encoding_count must equal the number of encodings the sender already has --
+ * WebRTC does not allow the count to change -- which is what get_parameters
+ * reports. RTC_ERR_INVALID_ARG if it differs, or if the sender refuses a
+ * value; RTC_ERR_INVALID_STATE if the peer connection is closed. */
+RTC_API rtc_status RTC_CALL
+rtc_rtp_sender_set_parameters(rtc_rtp_sender* sender,
+                              const rtc_rtp_encoding* encodings,
+                              int32_t encoding_count);
+
 /* The sender handle stays valid and must still be released. */
 RTC_API rtc_status RTC_CALL
 rtc_peer_connection_remove_track(rtc_peer_connection* pc,

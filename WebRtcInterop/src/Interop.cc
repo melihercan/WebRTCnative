@@ -41,7 +41,9 @@
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/video/adapted_video_track_source.h"
+#include "api/video/i420_buffer.h"
 #include "api/video/video_frame.h"
+#include "api/video/video_frame_buffer.h"
 #include "api/video/video_sink_interface.h"
 #include "api/video_codecs/builtin_video_decoder_factory.h"
 #include "api/video_codecs/builtin_video_encoder_factory.h"
@@ -126,9 +128,78 @@ class CameraSource : public webrtc::AdaptedVideoTrackSource,
   }
 
   /* VideoSinkInterface. Explicitly qualified because AdaptedVideoTrackSource
-   * declares a protected OnFrame with the same signature. */
+   * declares a protected OnFrame with the same signature.
+   *
+   * AdaptFrame is what applies the sinks' wants. Handing the base class every
+   * captured frame untouched -- as this did -- loses all of them, and the
+   * measured consequences are worth being precise about, because one of the
+   * three is not what it looks like:
+   *
+   *   - max_framerate is lost outright. The source keeps delivering at capture
+   *     rate; asking for 10 fps from a 30 fps camera changed nothing.
+   *   - The encoder's requests for fewer pixels under CPU or bandwidth
+   *     pressure reach the adapter and stop there, so a struggling machine
+   *     gets no relief.
+   *   - scale_resolution_down_by still WORKS without this, because
+   *     VideoStreamEncoder scales a frame that does not match the configured
+   *     resolution. What it costs is that the camera goes on capturing and
+   *     delivering full-size frames for the encoder to shrink one at a time.
+   *
+   * So the picture shrinking is not evidence that this is working;
+   * media-source width and framesPerSecond are. See test/SenderParameters.c,
+   * which measures both against a capturer with and without this call. */
   void OnFrame(const webrtc::VideoFrame& frame) override {
-    webrtc::AdaptedVideoTrackSource::OnFrame(frame);
+    const int64_t time_us = frame.timestamp_us();
+    int out_width = 0;
+    int out_height = 0;
+    int crop_width = 0;
+    int crop_height = 0;
+    int crop_x = 0;
+    int crop_y = 0;
+
+    if (!AdaptFrame(frame.width(), frame.height(), time_us, &out_width,
+                    &out_height, &crop_width, &crop_height, &crop_x,
+                    &crop_y)) {
+      /* Either no sink wants a frame or the adapter is thinning the rate.
+       * Dropping is the normal outcome and AdaptFrame has already told the
+       * broadcaster about it, so there is nothing to do but return. */
+      return;
+    }
+
+    /* The common case by far: nothing is being asked for, so the frame goes
+     * through untouched and no buffer is allocated. */
+    if (out_width == frame.width() && out_height == frame.height() &&
+        crop_width == frame.width() && crop_height == frame.height()) {
+      webrtc::AdaptedVideoTrackSource::OnFrame(frame);
+      return;
+    }
+
+    webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer =
+        frame.video_frame_buffer();
+    if (buffer == nullptr) {
+      return;
+    }
+    webrtc::scoped_refptr<webrtc::I420BufferInterface> i420 = buffer->ToI420();
+    if (i420 == nullptr) {
+      return;
+    }
+
+    webrtc::scoped_refptr<webrtc::I420Buffer> adapted =
+        webrtc::I420Buffer::Create(out_width, out_height);
+    if (adapted == nullptr) {
+      return;
+    }
+    adapted->CropAndScaleFrom(*i420, crop_x, crop_y, crop_width, crop_height);
+
+    /* Rotation is carried rather than applied: the base class applies it when
+     * the sinks want it applied, and the renderer is told either way. */
+    webrtc::AdaptedVideoTrackSource::OnFrame(
+        webrtc::VideoFrame::Builder()
+            .set_video_frame_buffer(adapted)
+            .set_rotation(frame.rotation())
+            .set_timestamp_us(time_us)
+            .set_id(frame.id())
+            .build());
   }
 
   bool is_screencast() const override { return false; }

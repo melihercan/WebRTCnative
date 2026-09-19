@@ -92,6 +92,24 @@ class DesktopSource : public webrtc::AdaptedVideoTrackSource,
       return;
     }
 
+    /* Same contract as CameraSource::OnFrame in Interop.cc, which carries the
+     * full note on what applying the sinks' wants does and does not change.
+     * Asked here, before the conversion, so a frame the adapter drops costs no
+     * BGRA-to-I420 pass at all -- on a 4K screen that pass is the expensive
+     * part of this loop. */
+    const int64_t time_us = webrtc::TimeMicros();
+    int out_width = 0;
+    int out_height = 0;
+    int crop_width = 0;
+    int crop_height = 0;
+    int crop_x = 0;
+    int crop_y = 0;
+
+    if (!AdaptFrame(width, height, time_us, &out_width, &out_height,
+                    &crop_width, &crop_height, &crop_x, &crop_y)) {
+      return;
+    }
+
     webrtc::scoped_refptr<webrtc::I420Buffer> buffer =
         webrtc::I420Buffer::Create(width, height);
     if (buffer == nullptr) {
@@ -107,10 +125,23 @@ class DesktopSource : public webrtc::AdaptedVideoTrackSource,
       return;
     }
 
+    webrtc::scoped_refptr<webrtc::VideoFrameBuffer> adapted = buffer;
+    if (out_width != width || out_height != height || crop_width != width ||
+        crop_height != height) {
+      webrtc::scoped_refptr<webrtc::I420Buffer> scaled =
+          webrtc::I420Buffer::Create(out_width, out_height);
+      if (scaled == nullptr) {
+        return;
+      }
+      scaled->CropAndScaleFrom(*buffer, crop_x, crop_y, crop_width,
+                               crop_height);
+      adapted = scaled;
+    }
+
     webrtc::AdaptedVideoTrackSource::OnFrame(
         webrtc::VideoFrame::Builder()
-            .set_video_frame_buffer(buffer)
-            .set_timestamp_us(webrtc::TimeMicros())
+            .set_video_frame_buffer(adapted)
+            .set_timestamp_us(time_us)
             .set_rotation(webrtc::kVideoRotation_0)
             .build());
   }

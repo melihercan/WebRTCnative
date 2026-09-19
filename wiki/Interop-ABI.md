@@ -467,6 +467,8 @@ paths, and release with a live observer still registered.
 ```c
 rtc_peer_connection_add_track(pc, track, stream_id, &sender);  /* sender may be null */
 rtc_rtp_sender_replace_track(sender, track);                   /* track may be null  */
+rtc_rtp_sender_get_parameters(sender, buffer, capacity, &count);
+rtc_rtp_sender_set_parameters(sender, encodings, count);
 rtc_peer_connection_remove_track(pc, sender);
 rtc_rtp_sender_release(sender);
 ```
@@ -497,6 +499,54 @@ exactly one owner and one release.
 `test/Sender.c` covers it against a live connection: replacing with a same-kind track, with null,
 and back; a video track refused on an audio sender; the connection still connected and *no*
 renegotiation raised by any of it; removal, second removal, the null-argument paths, and release.
+
+### Sender parameters
+
+`get_parameters` / `set_parameters` cap a sender mid-call — the "low data" case, where a weak link
+needs a smaller picture, fewer frames and a bitrate ceiling without dropping the call.
+
+**The transaction does not cross the ABI, and that is the whole design decision.** WebRTC rejects
+a `setParameters` whose argument did not come from a recent `getParameters` on the same sender:
+the parameters carry a transaction id, and a stale one fails at *run time* with
+`InvalidModification`. So `set_parameters` takes only the encodings, does its own get, applies the
+writable fields and sets the result back. A caller never holds a token it has to keep fresh. The
+alternative — handing out an opaque handle the set consumes — would put that lifetime on every
+caller for no gain, since the C# side's `RTCRtpSendParameters` is a plain object anyway.
+
+Two further constraints WebRTC imposes, both enforced here rather than discovered later: the
+number of encodings may not change between the get and the set (`RTC_ERR_INVALID_ARG` if it
+differs), and only `active`, `max_bitrate`, `max_framerate`, `scale_resolution_down_by` and
+`scalability_mode` are writable. `rid` is left as negotiation settled it.
+
+`get_parameters` is the same two-call shape as `get_transceivers`: null buffer for the count, then
+a buffer of at least that size, and nothing is written if it is too small. `rid` and
+`scalability_mode` come back caller-owned — free them with `rtc_string_free` — and the numeric
+sentinels match `rtc_rtp_encoding`, so a get feeds straight back into a set. A sentinel on a set
+*clears* rather than being ignored, which is how a cap is lifted.
+
+### Which side enforces what
+
+Not uniform, and worth knowing before trusting a stats field as evidence. Measured on M152 with
+`test/SenderParameters.c`, the same binary run against a capturer with and without `AdaptFrame`:
+
+| | source ignores adaptation | source calls `AdaptFrame` |
+|---|---|---|
+| `outbound-rtp.frameWidth` with `scale_resolution_down_by` 2 | 320 | 320 |
+| `media-source.width` | *absent* | 640 |
+| `media-source.framesPerSecond` with `max_framerate` 10 | 29 | 10 |
+
+- **`max_bitrate`** — the encoder. Holds regardless.
+- **`scale_resolution_down_by`** — the encoder *also* scales, in
+  `video_stream_encoder.cc`, when a frame does not match the configured resolution. The picture
+  therefore shrinks even for a source that ignores adaptation. **`frameWidth` is no evidence about
+  the source**, which is the trap: it looks like proof and is not.
+- **`max_framerate`** — the source's frame adapter, and only there. A source that never calls
+  `AdaptFrame` keeps delivering at capture rate and the request is silently lost.
+
+`AdaptedVideoTrackSource::GetStats` reports nothing until `AdaptFrame` has recorded a size, so an
+absent `media-source.width` is the reliable signal that a capturer is handing frames straight
+through — and the same omission means the encoder's requests for fewer pixels under CPU or
+bandwidth pressure have nowhere to land. Both `CameraSource` and `DesktopSource` call it.
 
 ## Desktop capture — **implemented**
 
@@ -598,12 +648,13 @@ be the first sign of.
 
 ## Still out of scope
 
-Transceivers and `getUserMedia` constraint negotiation, simulcast, insertable
-streams, DTMF, ICE restart, receivers, per-sender and per-receiver `getStats`, audio device
-*selection*
-(enumeration works; `audio_track_create` takes no device id), and an `on_ice_gathering_state`
-callback — without which a caller can observe gathering starting but never completing. Each is
-additive and none changes the conventions above.
+`getUserMedia` constraint negotiation, insertable streams, DTMF, ICE restart, audio device
+*selection* (enumeration works; `audio_track_create` takes no device id), an
+`on_ice_gathering_state` callback — without which a caller can observe gathering starting but
+never completing — and capture format negotiation: `CameraSource::Create` asks for
+`VideoType::kI420` outright, so a camera that does not publish I420 at that size is converted
+silently and the size actually opened is never reported back. Each is additive and none changes
+the conventions above.
 
 ## Working notes
 

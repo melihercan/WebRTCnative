@@ -586,6 +586,80 @@ rtc_peer_connection_add_track(rtc_peer_connection* pc,
  *  Senders
  * ---------------------------------------------------------------------- */
 
+namespace webrtc_interop {
+namespace {
+
+/* The writable half of an encoding, applied onto parameters that came from a
+ * live GetParameters so everything else they carry -- ssrc, rid, the
+ * negotiated codec -- survives untouched.
+ *
+ * Unset is assigned rather than skipped: -1 for a bitrate means "no cap", and
+ * a caller lifting a cap it set earlier has to be able to clear the field, not
+ * merely fail to set it again. */
+void ApplyInterop(const rtc_rtp_encoding& in,
+                  webrtc::RtpEncodingParameters* out) {
+  out->active = in.active != 0;
+  out->max_bitrate_bps =
+      in.max_bitrate >= 0 ? std::optional<int>(in.max_bitrate) : std::nullopt;
+  out->max_framerate =
+      in.max_framerate >= 0
+          ? std::optional<double>(static_cast<double>(in.max_framerate))
+          : std::nullopt;
+  out->scale_resolution_down_by =
+      in.scale_resolution_down_by > 0.0
+          ? std::optional<double>(in.scale_resolution_down_by)
+          : std::nullopt;
+  out->scalability_mode = in.scalability_mode != nullptr
+                              ? std::optional<std::string>(in.scalability_mode)
+                              : std::nullopt;
+}
+
+/* The reverse, for get_parameters. False only on allocation failure, having
+ * freed whatever it had already allocated and written nothing, so a caller is
+ * never handed a half-built struct it cannot tell from a full one. */
+bool ToInterop(const webrtc::RtpEncodingParameters& in, rtc_rtp_encoding* out) {
+  char* rid = nullptr;
+  char* scalability_mode = nullptr;
+
+  if (!in.rid.empty()) {
+    rid = DuplicateString(in.rid.c_str());
+    if (rid == nullptr) {
+      return false;
+    }
+  }
+  if (in.scalability_mode.has_value()) {
+    scalability_mode = DuplicateString(in.scalability_mode->c_str());
+    if (scalability_mode == nullptr) {
+      rtc_string_free(rid);
+      return false;
+    }
+  }
+
+  out->rid = rid;
+  out->active = in.active ? 1 : 0;
+  out->max_bitrate = in.max_bitrate_bps.has_value()
+                         ? static_cast<int32_t>(*in.max_bitrate_bps)
+                         : -1;
+  out->max_framerate = in.max_framerate.has_value()
+                           ? static_cast<int32_t>(*in.max_framerate)
+                           : -1;
+  out->scale_resolution_down_by = in.scale_resolution_down_by.value_or(0.0);
+  out->scalability_mode = scalability_mode;
+  return true;
+}
+
+/* Frees the strings a filled encoding owns, for the failure path that has to
+ * hand back nothing at all. */
+void FreeEncodingStrings(rtc_rtp_encoding* encoding) {
+  rtc_string_free(const_cast<char*>(encoding->rid));
+  rtc_string_free(const_cast<char*>(encoding->scalability_mode));
+  encoding->rid = nullptr;
+  encoding->scalability_mode = nullptr;
+}
+
+}  // namespace
+}  // namespace webrtc_interop
+
 RTC_API rtc_status RTC_CALL
 rtc_rtp_sender_replace_track(rtc_rtp_sender* sender, rtc_media_track* track) {
   if (sender == nullptr || sender->sender == nullptr) {
@@ -600,6 +674,96 @@ rtc_rtp_sender_replace_track(rtc_rtp_sender* sender, rtc_media_track* track) {
    * does not distinguish the two, so report the argument error, which is the
    * one a caller can act on. */
   return sender->sender->SetTrack(raw) ? RTC_OK : RTC_ERR_INVALID_ARG;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_sender_get_parameters(rtc_rtp_sender* sender,
+                              rtc_rtp_encoding* buffer,
+                              int32_t capacity,
+                              int32_t* out_count) {
+  if (sender == nullptr || sender->sender == nullptr || capacity < 0) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  if (buffer == nullptr && capacity > 0) {
+    return RTC_ERR_INVALID_ARG;
+  }
+
+  const webrtc::RtpParameters parameters = sender->sender->GetParameters();
+  const int32_t count = static_cast<int32_t>(parameters.encodings.size());
+  if (out_count != nullptr) {
+    *out_count = count;
+  }
+  if (buffer == nullptr) {
+    return RTC_OK;
+  }
+  if (capacity < count) {
+    return RTC_ERR_INVALID_ARG;
+  }
+
+  /* Chromium builds with -Wunsafe-buffer-usage. A C ABI necessarily takes an
+   * array as pointer plus count, and the capacity is checked above, so the
+   * suppression is scoped to these accesses. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
+  for (int32_t i = 0; i < count; ++i) {
+    if (!webrtc_interop::ToInterop(parameters.encodings[i], &buffer[i])) {
+      for (int32_t j = 0; j < i; ++j) {
+        webrtc_interop::FreeEncodingStrings(&buffer[j]);
+      }
+      return RTC_ERR_INTERNAL;
+    }
+  }
+#pragma clang diagnostic pop
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_rtp_sender_set_parameters(rtc_rtp_sender* sender,
+                              const rtc_rtp_encoding* encodings,
+                              int32_t encoding_count) {
+  if (sender == nullptr || sender->sender == nullptr || encoding_count < 0) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  if (encoding_count > 0 && encodings == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+
+  /* The get and the set are one transaction and it stays inside the shim: the
+   * parameters carry a transaction id WebRTC checks, so they have to be
+   * applied to an object it has just handed out. */
+  webrtc::RtpParameters parameters = sender->sender->GetParameters();
+  if (static_cast<int32_t>(parameters.encodings.size()) != encoding_count) {
+    RTC_LOG(LS_ERROR) << "set_parameters: sender has "
+                      << parameters.encodings.size() << " encodings, not "
+                      << encoding_count << "; the count may not change";
+    return RTC_ERR_INVALID_ARG;
+  }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
+  for (int32_t i = 0; i < encoding_count; ++i) {
+    webrtc_interop::ApplyInterop(encodings[i], &parameters.encodings[i]);
+  }
+#pragma clang diagnostic pop
+
+  webrtc::RTCError error = sender->sender->SetParameters(parameters);
+  if (error.ok()) {
+    return RTC_OK;
+  }
+
+  RTC_LOG(LS_ERROR) << "set_parameters failed: " << error.message();
+  /* Separated because they send the caller to different places: a value the
+   * sender will not accept is the caller's to fix, while a closed peer
+   * connection is not about the values at all. */
+  switch (error.type()) {
+    case webrtc::RTCErrorType::INVALID_MODIFICATION:
+    case webrtc::RTCErrorType::INVALID_PARAMETER:
+    case webrtc::RTCErrorType::INVALID_RANGE:
+    case webrtc::RTCErrorType::UNSUPPORTED_OPERATION:
+      return RTC_ERR_INVALID_ARG;
+    default:
+      return RTC_ERR_INVALID_STATE;
+  }
 }
 
 RTC_API rtc_status RTC_CALL
@@ -683,22 +847,13 @@ rtc_rtp_transceiver* WrapTransceiver(
  * divisor, which is why those are the sentinels. */
 webrtc::RtpEncodingParameters FromInterop(const rtc_rtp_encoding& encoding) {
   webrtc::RtpEncodingParameters out;
+  /* rid is set only here. A sender's rid is fixed by negotiation, so
+   * ApplyInterop -- which exists for set_parameters -- leaves it alone; this
+   * is the one path that names a layer in the first place. */
   if (encoding.rid != nullptr) {
     out.rid = encoding.rid;
   }
-  out.active = encoding.active != 0;
-  if (encoding.max_bitrate >= 0) {
-    out.max_bitrate_bps = encoding.max_bitrate;
-  }
-  if (encoding.max_framerate >= 0) {
-    out.max_framerate = static_cast<double>(encoding.max_framerate);
-  }
-  if (encoding.scale_resolution_down_by > 0.0) {
-    out.scale_resolution_down_by = encoding.scale_resolution_down_by;
-  }
-  if (encoding.scalability_mode != nullptr) {
-    out.scalability_mode = encoding.scalability_mode;
-  }
+  ApplyInterop(encoding, &out);
   return out;
 }
 

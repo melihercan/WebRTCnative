@@ -75,14 +75,15 @@ cd WebRTCnative.wiki; git add -A; git commit -m "Update wiki"; git push
 - `.github/actions/resolve-webrtc-branch/` — composite action plus `resolve_webrtc_branch.py`,
   the shared branch-resolution logic every workflow calls first.
 - `wiki/` — the documentation source. Keep it in step with workflow changes.
-- `WebRtcInterop/` — **the C ABI shim, in progress.** WebRTC's C++ API cannot be P/Invoked, so
-  .NET needs a flat C surface; this is it, and it is the missing piece for a Windows binding that
-  replaces SIPSorcery. Built by `WebRtcNativeInteropWindows`, the only workflow that compiles code
-  from this repository. Its `BUILD.gn` only resolves from inside a WebRTC checkout, so the workflow
-  grafts the directory to `src/WebRtcInterop` and adds `"//WebRtcInterop"` to the root group.
-  `src/Interop.cc` has three factory exports and a stalled `CallCreatePeerConnectionFactory`;
-  `include/Interop.h` and `test/Tests.cc` are still empty. Folded in from a standalone repo in
-  2026; that history is on the `archive/webrtcinterop-2023` branch.
+- `WebRtcInterop/` — **the C ABI shim.** WebRTC's C++ API cannot be P/Invoked, so .NET needs a
+  flat C surface; this is it, and it is what a Windows binding uses instead of SIPSorcery. Built by
+  `WebRtcNativeInteropWindows`, the only workflow that compiles code from this repository. Its
+  `BUILD.gn` only resolves from inside a WebRTC checkout, so the workflow grafts the directory to
+  `src/WebRtcInterop` and adds `"//WebRtcInterop"` to the root group. `include/Interop.h` is the
+  whole surface and `wiki/Interop-ABI.md` explains its conventions — read that before adding to it,
+  because the ownership and threading rules are not guessable from the signatures.
+  `test/*.c` are standalone harnesses that `LoadLibrary` the built DLL; they are not GN targets and
+  not built by the workflow.
 - `tools/make_platform_diagram.py` — regenerates the wiki's platform figure; run it after
   changing the data, the SVGs are build output.
 
