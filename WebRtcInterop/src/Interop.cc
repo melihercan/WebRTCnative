@@ -104,11 +104,35 @@ class CameraSource : public webrtc::AdaptedVideoTrackSource,
       return nullptr;
     }
 
-    webrtc::VideoCaptureCapability capability;
-    capability.width = width;
-    capability.height = height;
-    capability.maxFPS = fps;
-    capability.videoType = webrtc::VideoType::kI420;
+    /* Ask the device what it has rather than naming a pixel format and
+     * letting it convert. Pinning videoType to kI420 -- as this did -- is
+     * accepted by every camera and honoured by few: most publish MJPEG, NV12
+     * or YUY2 at the larger sizes, so the module quietly picked a nearby
+     * capability and converted every frame, MJPEG meaning a full decode per
+     * frame on the same thread that feeds the encoder. kUnknown leaves the
+     * format unconstrained, which is what makes GetBestMatchedCapability score
+     * on size and rate alone; the module still converts to the I420 the track
+     * wants, but now from a format the device actually produces. */
+    webrtc::VideoCaptureCapability requested;
+    requested.width = width;
+    requested.height = height;
+    requested.maxFPS = fps;
+    requested.videoType = webrtc::VideoType::kUnknown;
+
+    webrtc::VideoCaptureCapability capability = requested;
+    std::unique_ptr<webrtc::VideoCaptureModule::DeviceInfo> info(
+        webrtc::VideoCaptureFactory::CreateDeviceInfo());
+    if (info == nullptr ||
+        info->GetBestMatchedCapability(device_id, requested, capability) < 0) {
+      /* No capability list to choose from. Fall back to the old request
+       * exactly, I420 included, rather than starting with kUnknown -- which
+       * some backends refuse. */
+      capability = requested;
+      capability.videoType = webrtc::VideoType::kI420;
+      RTC_LOG(LS_WARNING) << "no capability list for " << device_id
+                          << "; requesting " << width << "x" << height << "@"
+                          << fps << " as I420";
+    }
 
     webrtc::scoped_refptr<CameraSource> source(
         new webrtc::RefCountedObject<CameraSource>());
@@ -116,15 +140,29 @@ class CameraSource : public webrtc::AdaptedVideoTrackSource,
     if (module->StartCapture(capability) != 0) {
       module->DeRegisterCaptureDataCallback();
       RTC_LOG(LS_ERROR) << "capture device " << device_id << " exists but would "
-                        << "not start at " << width << "x" << height << "@"
-                        << fps << "; it is probably in use by another "
-                        << "application";
+                        << "not start at " << capability.width << "x"
+                        << capability.height << "@" << capability.maxFPS
+                        << "; it is probably in use by another application";
       *out_status = RTC_ERR_INVALID_STATE;
       return nullptr;
     }
 
+    if (capability.width != width || capability.height != height ||
+        capability.maxFPS != fps) {
+      RTC_LOG(LS_INFO) << "camera " << device_id << " opened at "
+                       << capability.width << "x" << capability.height << "@"
+                       << capability.maxFPS << ", not the requested " << width
+                       << "x" << height << "@" << fps;
+    }
+
+    source->capability_ = capability;
     source->module_ = std::move(module);
     return source;
+  }
+
+  /* What the device was actually opened at. */
+  const webrtc::VideoCaptureCapability& capability() const {
+    return capability_;
   }
 
   /* VideoSinkInterface. Explicitly qualified because AdaptedVideoTrackSource
@@ -222,6 +260,7 @@ class CameraSource : public webrtc::AdaptedVideoTrackSource,
 
  private:
   webrtc::scoped_refptr<webrtc::VideoCaptureModule> module_;
+  webrtc::VideoCaptureCapability capability_;
 };
 
 }  // namespace
@@ -634,7 +673,37 @@ RTC_API rtc_status RTC_CALL rtc_video_track_create(rtc_factory* factory,
     return RTC_ERR_INTERNAL;
   }
   handle->track = std::move(track);
+  /* Recorded from the capability that was actually started, not from the
+   * arguments: those are a request, and the two differ more often than not. */
+  handle->capture_width = source->capability().width;
+  handle->capture_height = source->capability().height;
+  handle->capture_frame_rate = source->capability().maxFPS;
   *out_track = handle;
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL
+rtc_video_track_get_settings(rtc_media_track* track,
+                             int32_t* out_width,
+                             int32_t* out_height,
+                             int32_t* out_frame_rate) {
+  if (track == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+  if (track->capture_width == 0 && track->capture_height == 0 &&
+      track->capture_frame_rate == 0) {
+    return RTC_ERR_NOT_FOUND;
+  }
+
+  if (out_width != nullptr) {
+    *out_width = track->capture_width;
+  }
+  if (out_height != nullptr) {
+    *out_height = track->capture_height;
+  }
+  if (out_frame_rate != nullptr) {
+    *out_frame_rate = track->capture_frame_rate;
+  }
   return RTC_OK;
 }
 

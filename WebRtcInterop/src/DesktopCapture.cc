@@ -325,6 +325,9 @@ rtc_desktop_track_create(rtc_factory* factory,
     return RTC_ERR_INTERNAL;
   }
   handle->track = std::move(track);
+  /* The rate is chosen here; the size is whatever the screen or window turns
+   * out to be, and is not known until a frame arrives, so it stays zero. */
+  handle->capture_frame_rate = max_fps;
 
   *out_track = handle;
   return RTC_OK;

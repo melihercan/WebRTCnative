@@ -481,6 +481,23 @@ rtc_peer_connection_add_track(rtc_peer_connection* pc,
                               const char* stream_id,
                               rtc_rtp_sender** out_sender);
 
+/* W3C getSettings(), narrowed to the three a video track can answer for.
+ *
+ * Worth asking rather than assuming, because a capture request is a
+ * preference, not a contract: a camera that does not publish the requested
+ * size answers with its nearest supported one and says nothing, so a track
+ * created at 1280x720 may well be running at something else. These are the
+ * numbers the frames will actually arrive at.
+ *
+ * RTC_ERR_NOT_FOUND when the track has no capture format to report -- an audio
+ * track, or a track that arrived from the remote peer. Any out pointer may be
+ * null if that value is not wanted. */
+RTC_API rtc_status RTC_CALL
+rtc_video_track_get_settings(rtc_media_track* track,
+                             int32_t* out_width,
+                             int32_t* out_height,
+                             int32_t* out_frame_rate);
+
 /* -------------------------------------------------------------------------
  *  Senders
  *

@@ -460,6 +460,39 @@ the handle.
 reaching open with matching ids, text and binary each way with the binary flag intact, the error
 paths, and release with a live observer still registered.
 
+## Capture format — **negotiated, and reported**
+
+`video_track_create` takes a width, height and frame rate, and those are a *preference*. The
+capture module answers an unsupported request with its nearest supported format and says nothing
+about having done so, which is how a track ends up claiming a size it is not running at. Android
+had the same trap recorded in WebRTCme's notes; a 720x1280 request opened a camera at 1088x1088.
+
+Two changes make that visible rather than silent.
+
+**The pixel format is no longer pinned.** `CameraSource::Create` used to name
+`VideoType::kI420`. Few USB cameras publish I420 at the larger sizes — they publish MJPEG, NV12 or
+YUY2 — so the module accepted the request, picked a nearby capability and converted every frame,
+which for MJPEG is a full decode per frame on the thread that feeds the encoder. It now asks with
+`kUnknown` and lets `DeviceInfo::GetBestMatchedCapability` score on size and rate alone. The
+module still converts to the I420 the track wants, but from a format the device actually produces.
+
+**The chosen capability is recorded and can be read back:**
+
+```c
+rtc_video_track_get_settings(track, &width, &height, &frame_rate);
+```
+
+W3C `getSettings()`, narrowed to the three a video track can answer for, and it maps onto
+`IMediaStreamTrack.GetSettings()` on the managed side — which previously echoed the request back.
+`RTC_ERR_NOT_FOUND` for an audio track or one that arrived from the remote peer, since neither has
+a capture format. A desktop track reports its rate with a zero size: the screen's size is not
+fixed until the first frame arrives.
+
+`test/FrameSink.c` asks a real camera for **999x777@29** and reports what it gets — a Logitech
+C615 answers **1600x896@30** — then asserts on the ordinary track that the reported size equals
+the size the frames actually arrive at. That equality is the whole value of the call; without it
+the numbers are decoration.
+
 ## Senders — **implemented**
 
 `add_track` gained an out-parameter and three functions joined it.
@@ -649,12 +682,9 @@ be the first sign of.
 ## Still out of scope
 
 `getUserMedia` constraint negotiation, insertable streams, DTMF, ICE restart, audio device
-*selection* (enumeration works; `audio_track_create` takes no device id), an
+*selection* (enumeration works; `audio_track_create` takes no device id), and an
 `on_ice_gathering_state` callback — without which a caller can observe gathering starting but
-never completing — and capture format negotiation: `CameraSource::Create` asks for
-`VideoType::kI420` outright, so a camera that does not publish I420 at that size is converted
-silently and the size actually opened is never reported back. Each is additive and none changes
-the conventions above.
+never completing. Each is additive and none changes the conventions above.
 
 ## Working notes
 

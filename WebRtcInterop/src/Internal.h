@@ -76,6 +76,15 @@ struct rtc_media_track {
   ~rtc_media_track();
 
   webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> track;
+  /* What the source was actually opened at, which is not always what was
+   * asked for: a camera answers an unsupported request with its nearest
+   * supported format. Recorded at creation and reported by
+   * rtc_video_track_get_settings. Zero means not applicable or not known --
+   * audio tracks, remote tracks, and a screen whose size is not fixed until
+   * the first frame arrives. */
+  int32_t capture_width = 0;
+  int32_t capture_height = 0;
+  int32_t capture_frame_rate = 0;
   /* Audio tracks do not own their source, so hold a reference here to keep it
    * alive for as long as the caller holds the track. Video tracks do own
    * theirs, and this stays null. */
