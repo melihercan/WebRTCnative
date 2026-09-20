@@ -18,6 +18,13 @@ on:
         required: false
         default: ''
 
+env:
+  # javac --release for every Java class in the archive. Not a preference: the
+  # .NET Android toolchain that consumes this AAR reads class file major 65 at
+  # most, and M153's Chromium builds at 25 (major 69), which it rejects
+  # outright. Raise this only when the consumer can read the result.
+  JAVA_RELEASE: '21'
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -92,6 +99,50 @@ jobs:
           # idempotent; if an assertion fires, update the script, do not skip it.
           python3 "$GITHUB_WORKSPACE/tools/add_generated_jni_to_aar.py"             "$HOME/webrtc-checkout/src/sdk/android/BUILD.gn"
 
+      - name: Compile Java at a release the consumer can read
+        run: |
+          set -euo pipefail
+          cd "$HOME/webrtc-checkout/src"
+
+          # Chromium pins javac --release, and M153 moved it to 25, which emits
+          # class file major 69. The .NET Android toolchain reads at most major
+          # 65, so an AAR built that way is rejected wholesale:
+          #
+          #   class file has wrong version 69.0, should be 65.0
+          #
+          # Two files declare it and the upstream comments say to keep them in
+          # step, so both are patched and both are asserted first: a
+          # find-and-replace that matches nothing exits 0 and would leave the
+          # build producing an archive nobody can consume.
+          python3 - "$JAVA_RELEASE" <<'PY'
+          import re, sys
+
+          release = sys.argv[1]
+          targets = [
+              ('build/android/gyp/compile_java.py',
+               re.compile(r"('--release',\s*(?:#[^\n]*\n\s*)*')(\d+)(')")),
+              ('build/android/gyp/turbine.py',
+               re.compile(r"(javac_cmd = \['--release',\s*')(\d+)(')")),
+          ]
+
+          for path, pattern in targets:
+              text = open(path, encoding='utf-8').read()
+              found = pattern.search(text)
+              if not found:
+                  raise SystemExit(
+                      '%s no longer declares javac --release where this patch '
+                      'looks. Update the pattern rather than removing the step: '
+                      'without it the AAR is built at a bytecode level .NET '
+                      'Android cannot read.' % path)
+              current = found.group(2)
+              if current == release:
+                  print('%s already at --release %s' % (path, release))
+                  continue
+              open(path, 'w', encoding='utf-8').write(
+                  pattern.sub(lambda m: m.group(1) + release + m.group(3), text, count=1))
+              print('%s: --release %s -> %s' % (path, current, release))
+          PY
+
       - name: Build the AAR
         env:
           ARCH: ${{ inputs.arch }}
@@ -124,7 +175,7 @@ jobs:
           cd "$HOME/webrtc-checkout/src"
           # The registration library's javac jar is empty, so dist_jar merges
           # nothing and GEN_JNI never reaches classes.jar. See the script.
-          python3 "$GITHUB_WORKSPACE/tools/inject_gen_jni.py"             --aar ./libwebrtc.aar --build-dir ./out_aar --src-root .
+          python3 "$GITHUB_WORKSPACE/tools/inject_gen_jni.py"             --aar ./libwebrtc.aar --build-dir ./out_aar --src-root .             --java-release "$JAVA_RELEASE"
 
       - name: Collect libwebrtc.aar
         run: |
@@ -141,17 +192,45 @@ jobs:
           # artifact. Both halves matter: the generated *Jni classes, and the
           # GEN_JNI registry every one of them calls into. An archive with the
           # first and not the second crashes just as surely, one class later.
-          python3 - "$aar" <<'PY'
-          import io, sys, zipfile
+          #
+          # The bytecode level is checked for the same reason: a class file
+          # newer than the consumer's javac is rejected before anything runs,
+          # and one stray class is enough. That is not hypothetical -- the
+          # injected GEN_JNI used to be the only major-69 class in an otherwise
+          # major-65 archive.
+          python3 - "$aar" "$JAVA_RELEASE" <<'PY'
+          import collections, io, struct, sys, zipfile
+
           aar = zipfile.ZipFile(sys.argv[1])
-          classes = zipfile.ZipFile(io.BytesIO(aar.read('classes.jar'))).namelist()
+          ceiling = int(sys.argv[2]) + 44          # javac release N -> major N+44
+          jar = zipfile.ZipFile(io.BytesIO(aar.read('classes.jar')))
+          classes = jar.namelist()
           jni = [c for c in classes if c.endswith('Jni.class')]
           print('classes.jar: %d classes, %d generated JNI' % (len(classes), len(jni)))
+
           missing = [n for n in ('org/webrtc/PeerConnectionFactoryJni.class',
                                  'org/jni_zero/GEN_JNI.class') if n not in classes]
           if missing:
               sys.exit('::error::classes.jar is missing %s; the generated JNI patch did not '
                        'take and this AAR would crash on startup.' % ', '.join(missing))
+
+          majors = collections.Counter()
+          for name in classes:
+              if not name.endswith('.class'):
+                  continue
+              head = jar.read(name)[:8]
+              if head[:4] == b'Êþº¾':
+                  majors[struct.unpack('>HH', head[4:8])[1]] += 1
+          for major, count in sorted(majors.items()):
+              print('  class file major %d: %d classes' % (major, count))
+
+          too_new = {m: c for m, c in majors.items() if m > ceiling}
+          if too_new:
+              sys.exit('::error::%d class(es) are compiled above major %d: %s. A consumer '
+                       'whose javac stops at major %d rejects the archive with "class file '
+                       'has wrong version". Check the javac --release patch and the GEN_JNI '
+                       'injector agree.'
+                       % (sum(too_new.values()), ceiling, dict(too_new), ceiling))
           PY
 
           cp "$aar" "$GITHUB_WORKSPACE/libwebrtc.aar"

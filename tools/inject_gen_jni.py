@@ -96,6 +96,11 @@ def main(argv):
                         help="the --build-dir given to build_aar.py")
     parser.add_argument("--src-root", default=".",
                         help="WebRTC checkout root, for its bundled JDK")
+    parser.add_argument("--java-release", default="21",
+                        help="javac --release level. Must match what the rest "
+                             "of the archive was built at, and must be one the "
+                             "consuming toolchain can read: .NET Android's "
+                             "javac rejects anything above 21.")
     args = parser.parse_args(argv)
 
     source = find_source(args.build_dir)
@@ -105,7 +110,13 @@ def main(argv):
     print("javac: %s" % javac)
 
     with tempfile.TemporaryDirectory() as work:
-        subprocess.run([javac, "-nowarn", "-d", work, source], check=True)
+        # --release matters as much here as it does for the rest of the
+        # archive. Without it javac emits the bundled JDK's default, which is
+        # how one major-69 class ended up in an otherwise major-65 AAR -- a
+        # difference nothing noticed until a consumer tried to read that
+        # particular class.
+        subprocess.run([javac, "--release", args.java_release,
+                        "-nowarn", "-d", work, source], check=True)
         compiled = os.path.join(work, CLASS_NAME)
         if not os.path.isfile(compiled):
             raise SystemExit("javac produced no %s" % CLASS_NAME)
