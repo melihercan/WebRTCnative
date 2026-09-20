@@ -137,6 +137,55 @@ jobs:
           fi
           # List the slices so the log records what actually went in.
           ls -1 "$framework"
+
+          # The Catalyst framework is a versioned bundle, and the build puts
+          # PrivacyInfo.xcprivacy one directory too deep:
+          #
+          #   Versions/A/Versions/A/Resources/PrivacyInfo.xcprivacy   <- written here
+          #   Versions/A/Resources/Info.plist                         <- correct
+          #
+          # Nothing notices. The bundle is valid, the symlinks resolve, the app
+          # links and runs, and the privacy manifest is simply absent from
+          # anything that installs the framework faithfully -- until Apple
+          # rejects a submission for not declaring its API use. So fix the
+          # layout here rather than shipping an archive that quietly loses it.
+          for versioned in "$framework"/*/WebRTC.framework/Versions/A; do
+            [ -d "$versioned" ] || continue
+            stray="$versioned/Versions"
+            [ -d "$stray" ] || continue
+
+            echo "normalising $stray"
+            mkdir -p "$versioned/Resources"
+            # Only move what is actually missing from the right place, so this
+            # cannot overwrite a correct file with a stale one.
+            find "$stray" -type f | while read -r f; do
+              name=$(basename "$f")
+              if [ -e "$versioned/Resources/$name" ]; then
+                echo "  $name already in Resources, dropping the nested copy"
+              else
+                echo "  moving $name into Resources"
+                mv "$f" "$versioned/Resources/$name"
+              fi
+            done
+            rm -rf "$stray"
+          done
+
+          # Assert rather than hope: an archive without the privacy manifest is
+          # the failure this step exists to prevent, and it is invisible until
+          # submission. If the build is ever fixed upstream the loop above does
+          # nothing and this still passes.
+          for versioned in "$framework"/*/WebRTC.framework/Versions/A; do
+            [ -d "$versioned" ] || continue
+            if [ ! -f "$versioned/Resources/PrivacyInfo.xcprivacy" ]; then
+              echo "::error::$versioned/Resources/PrivacyInfo.xcprivacy is missing."
+              echo "The build moved it again, or stopped producing it. Check the"
+              echo "layout before shipping: Apple requires the manifest."
+              find "$versioned" -name 'PrivacyInfo.xcprivacy' -o -name 'Info.plist' | sed 's/^/  found: /'
+              exit 1
+            fi
+            echo "ok: $versioned/Resources/PrivacyInfo.xcprivacy"
+          done
+
           # Zip from inside out_ios_libs so the archive holds WebRTC.xcframework
           # at its root, and use -y to keep the framework's symlinks intact --
           # upload-artifact would otherwise dereference and corrupt the bundle.
