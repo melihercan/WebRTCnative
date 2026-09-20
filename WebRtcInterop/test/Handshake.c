@@ -156,12 +156,32 @@ int main(void) {
   printf("\n    remote tracks: %ld\n    pc1 connected: %s\n    pc2 connected: %s\n",
          g_tracks, g_conn1 ? "YES" : "no", g_conn2 ? "YES" : "no");
 
+  /* restartIce on a live connection. It only sets a flag the next offer reads,
+   * so there is nothing to observe here beyond it being callable and leaving
+   * the connection up -- the renegotiation it enables is the caller's job.
+   * Worth having because the alternative to a live check is discovering on a
+   * phone that the export is missing. */
+  int restart_ok = 0, restart_null = 0, still_connected = 0;
+  L(rtc_peer_connection_restart_ice, fpcc);
+  if (rtc_peer_connection_restart_ice) {
+    restart_ok = rtc_peer_connection_restart_ice(g_pc1) == RTC_OK;
+    restart_null = rtc_peer_connection_restart_ice(NULL) == RTC_ERR_INVALID_ARG;
+    Sleep(300);
+    still_connected = g_conn1 != 0;
+    printf("\n    restart_ice          %d (expect 0)\n", restart_ok ? 0 : -1);
+    printf("    restart_ice(NULL)    %s (expect -1)\n", restart_null ? "-1" : "wrong");
+    printf("    still connected      %s\n", still_connected ? "yes" : "NO");
+  } else {
+    printf("\n    restart_ice          MISSING EXPORT\n");
+  }
+
   rtc_peer_connection_close(g_pc1); rtc_peer_connection_close(g_pc2);
   rtc_media_track_release(audio);
   rtc_peer_connection_release(g_pc1); rtc_peer_connection_release(g_pc2);
   rtc_factory_release(f); rtc_terminate();
 
-  int pass = g_conn1 && g_conn2 && g_tracks && !bad;
+  int pass = g_conn1 && g_conn2 && g_tracks && !bad &&
+             restart_ok && restart_null && still_connected;
   printf("\n%s\n", pass ? "HANDSHAKE PASSED" : "INCOMPLETE");
   return pass ? 0 : 1;
 }

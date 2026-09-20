@@ -522,6 +522,19 @@ rtc_peer_connection_set_remote_description(rtc_peer_connection* pc,
 }
 
 RTC_API rtc_status RTC_CALL
+rtc_peer_connection_restart_ice(rtc_peer_connection* pc) {
+  if (pc == nullptr || pc->pc == nullptr) {
+    return RTC_ERR_INVALID_ARG;
+  }
+
+  /* Returns void upstream and cannot fail: it sets a flag the next offer reads.
+   * Reported as a status anyway, so the ABI stays uniform and a future failure
+   * has somewhere to go. */
+  pc->pc->RestartIce();
+  return RTC_OK;
+}
+
+RTC_API rtc_status RTC_CALL
 rtc_peer_connection_add_ice_candidate(rtc_peer_connection* pc,
                                       const char* mid,
                                       int32_t mline_index,

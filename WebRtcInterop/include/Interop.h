@@ -425,6 +425,16 @@ rtc_peer_connection_create(rtc_factory* factory,
                            void* user_data,
                            rtc_peer_connection** out_pc);
 
+/* W3C restartIce(). Tells the connection to gather fresh candidates and re-run
+ * connectivity checks, which is the only way back from a transport that has
+ * failed: a peer whose network path changed under it does not recover on its
+ * own, and without this a call stays dead while still looking connected.
+ *
+ * It does not renegotiate. The caller must offer afterwards, and that offer
+ * carries the new ICE credentials -- WebRTC treats every subsequent
+ * create_offer as if ice_restart were set. */
+RTC_API rtc_status RTC_CALL rtc_peer_connection_restart_ice(rtc_peer_connection* pc);
+
 /* W3C close() — an observable state transition. The handle stays valid, so
  * callbacks already in flight can still land. Release separately. */
 RTC_API rtc_status RTC_CALL rtc_peer_connection_close(rtc_peer_connection* pc);
