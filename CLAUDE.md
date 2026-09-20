@@ -223,8 +223,13 @@ Three consequences that will otherwise be rediscovered by debugging a null facto
 
 ## Working in this repo
 
-- **You cannot run these builds locally.** A WebRTC checkout is ~30 GB and needs `depot_tools`.
-  Dispatch from the Actions tab or `gh workflow run <file>.yml`. Roughly an hour per run.
+- **You cannot run the artifact builds locally.** A WebRTC checkout is ~30 GB and needs
+  `depot_tools`. Dispatch from the Actions tab or `gh workflow run <file>.yml`. Roughly an hour
+  per run.
+- **You can, however, iterate on the shim locally, and should.** `tools/local/` fetches a checkout
+  once and then rebuilds `WebRtcInterop` in seconds, with the C harnesses compiled against the
+  result. That loop is what makes a controlled experiment affordable -- the same binary built with
+  and without one call -- rather than guessing and waiting forty minutes to be told nothing.
 - **The resolver is the one thing that is locally testable** — run it directly (see above) before
   changing resolution logic.
 - Validate YAML edits by reading and parsing, not by executing. There is no test suite, linter or
