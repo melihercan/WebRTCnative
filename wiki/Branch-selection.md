@@ -10,9 +10,9 @@ Chromium milestone has a matching WebRTC branch:
 
 | Chromium milestone | WebRTC branch |
 |---|---|
+| M153 | `branch-heads/8010` |
 | M152 | `branch-heads/7977` |
 | M151 | `branch-heads/7922` |
-| M150 | `branch-heads/7871` |
 
 The mapping is published at <https://chromiumdash.appspot.com/branches>, and the numbers have been
 identical on both sides for a long time — but the workflows read the dashboard's `webrtc_branch`
@@ -35,15 +35,22 @@ The dashboard gives every branched milestone a phase:
 Taking the newest `stable` entry is what matches the **Stable** column of the dashboard's own
 branches page.
 
-At the time of writing:
+At the time of writing (2026-09-20, the day after M153 went stable):
 
 | Milestone | WebRTC branch | Phase | |
 |---|---|---|---|
-| 154 | 8037 | `beta` | |
-| 153 | 8010 | `stable_cut` | |
-| **152** | **7977** | **`stable`** | ← chosen |
-| 151 | 7922 | `stable` | |
+| 155 | 8059 | `beta` | |
+| 154 | 8037 | `stable_cut` | |
+| **153** | **8010** | **`stable`** | ← chosen |
+| 152 | 7977 | `extended` | |
 | 150 | 7871 | `extended` | |
+
+Note what a rollover does to the row above the chosen one: M152 moves from
+`stable` to `extended` and the auto-detected branch changes under you, without
+anything in this repository changing. That is the intent, but it means a build
+dispatched before and after a rollover produces different binaries from the
+same commit. Pin `webrtc_branch` when that matters — see *Rollovers are not
+free*, below.
 
 ## Two tempting approaches that are wrong
 
@@ -54,6 +61,30 @@ broad stable release, that endpoint already answered M153.
 **Taking the largest branch-head in the WebRTC repository.** Branch-heads are cut continuously and
 most of them are not milestones at all. While the stable milestone branch was 7977, the largest
 existing branch-head was 8043 — a branch nobody ships.
+
+## Rollovers are not free
+
+M152 to M153 (2026-09-19) cost four failed Windows builds and an Android
+archive nothing could read, and not one of those was about WebRTC's API — the
+interop shim compiled against M153 without a single source change. Every one
+was the surrounding toolchain moving:
+
+| What moved | What it looked like |
+|---|---|
+| Windows SDK pin, 26100 to 10.0.28000 | `gn gen` dies in `setup_toolchain.py`: *include path does not exist* |
+| Runner disk, with VS 18 now in the image | `LLVM ERROR: IO failure on output stream: no space on device`, 25 minutes in |
+| Android javac `--release`, 21 to 25 | the AAR builds fine and the *consumer* rejects it: *class file has wrong version 69.0* |
+
+Two lessons worth carrying into the next one:
+
+- **Do not work around a toolchain pin.** Pointing the checkout at the older
+  SDK got past `gn gen` and then failed compiling libvpx with `unknown type
+  name 'FILE_INFO_BY_HANDLE_CLASS'`. The pin was a real dependency. Install
+  what it asks for.
+- **A green build is not a usable artifact.** The Android archive was complete
+  and correct by every check the workflow had, and still unusable, because
+  nothing verified the bytecode level against what consumes it. The collect
+  step now does.
 
 ## Overriding
 

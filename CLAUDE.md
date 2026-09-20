@@ -92,7 +92,7 @@ cd WebRTCnative.wiki; git add -A; git commit -m "Update wiki"; git push
 Nothing in this repository hard-codes a WebRTC version. Every workflow resolves one at run time.
 
 WebRTC rides the Chromium release train: each milestone has a matching WebRTC branch and the
-numbers are the same (Chromium M152 → `branch-heads/7977`).
+numbers are the same (Chromium M153 → `branch-heads/8010`).
 
 **The rule: the highest milestone from `chromiumdash.appspot.com/fetch_milestones` whose
 `schedule_phase` is exactly `"stable"`, then take its `webrtc_branch`.**
@@ -165,6 +165,19 @@ macOS), PowerShell `(Get-Content …).replace(…)` / `-notmatch`.
   `DEPOT_TOOLS_WIN_TOOLCHAIN: 0` uses the runner's VS instead of Google's internal toolchain, and
   the VS path is discovered with `vswhere` rather than hard-coded to an edition. `depot_tools` is
   unzipped with `7z`, not cloned.
+  **Two steps exist because M153 would not build without them**, both before the fetch so they fail
+  in three minutes rather than thirty-five: the image is stripped of the Android SDK and hosted tool
+  cache (it leaves ~3 GB free once the checkout lands, and the build needs more), and the Windows
+  SDK Chromium pins is installed, because it pins an exact version and hands it to `vcvarsall`.
+  Do not "simplify" that to using whichever SDK the runner already has: it gets past `gn gen` and
+  then fails compiling libvpx.
+- **Android** — the AAR is compiled at `JAVA_RELEASE`, currently 21, and that is a *consumer*
+  constraint rather than a preference. M153's Chromium builds Java at `--release 25`, and the .NET
+  Android toolchain reads class file major 65 at most, so an archive built upstream's way is
+  rejected wholesale with *class file has wrong version 69.0*. Three producers have to agree:
+  Chromium's `compile_java.py` and `turbine.py`, patched in the checkout, and this repository's
+  `tools/inject_gen_jni.py`, which had no `--release` at all and so emitted one stray major-69
+  class into an otherwise major-65 archive.
 - **Linux / Android** — a "Free disk space" step removes preinstalled toolchains; without it the
   checkout does not fit. `build/install-build-deps` arrives with the gclient-pulled `build/`
   directory and has changed between `.sh` and `.py`, so the workflows probe for either.

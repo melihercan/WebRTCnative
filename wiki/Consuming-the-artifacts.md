@@ -88,6 +88,18 @@ unzip -l libwebrtc.aar | grep '\.so$'
 
 The default build covers `armeabi-v7a`, `arm64-v8a`, `x86` and `x86_64` — device and emulator both.
 
+**Check the bytecode level too**, because a complete, correct archive can still be unreadable:
+
+```bash
+unzip -p libwebrtc.aar classes.jar > classes.jar
+unzip -p classes.jar org/webrtc/PeerConnectionFactory.class | head -c 8 | xxd
+#        cafe babe 0000 0041   ^^^^ = major 65 = javac --release 21
+```
+
+.NET Android's javac reads major 65 at most. Upstream builds at `--release 25` (major 69) from
+M153 on, so the workflow pins `JAVA_RELEASE` and the collect step fails above the ceiling. If you
+consume this AAR from a toolchain with a *different* ceiling, that is the knob to move.
+
 ## iOS and Mac Catalyst
 
 Unzip `WebRTC.xcframework.zip` and check what came out:
@@ -104,6 +116,12 @@ and Mac Catalyst on both architectures. One xcframework therefore covers `net10.
 **Preserve the symlinks.** Unzip with a tool that keeps them (`unzip` and Finder both do). A
 framework whose symlinks were flattened will fail to link, often with a confusing error about a
 missing binary. This is why the workflow uploads a zip rather than the directory.
+
+**Known defect in the Mac Catalyst slice:** `PrivacyInfo.xcprivacy` is written to
+`Versions/A/Versions/A/Resources/` instead of `Versions/A/Resources/`, one level too deep, while
+`Info.plist` beside it is correct. A faithful install therefore drops the privacy manifest and
+nothing complains until Apple does. Move it up by hand until the workflow is fixed; iOS is
+unaffected and has it in both slices.
 
 ### Regenerating the ObjC bindings
 
