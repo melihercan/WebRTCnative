@@ -219,7 +219,7 @@ jobs:
               if not name.endswith('.class'):
                   continue
               head = jar.read(name)[:8]
-              if head[:4] == b'Êþº¾':
+              if head[:4] == bytes.fromhex('cafebabe'):
                   majors[struct.unpack('>HH', head[4:8])[1]] += 1
           for major, count in sorted(majors.items()):
               print('  class file major %d: %d classes' % (major, count))
