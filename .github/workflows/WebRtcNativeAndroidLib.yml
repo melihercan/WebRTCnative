@@ -17,6 +17,11 @@ on:
         description: 'ABIs to include, space separated. Empty builds every ABI build_aar.py supports.'
         required: false
         default: ''
+      symbols:
+        description: 'Also keep the unstripped .so files, so a native crash in this AAR can be symbolicated.'
+        required: false
+        default: true
+        type: boolean
 
 env:
   # javac --release for every Java class in the archive. Not a preference: the
@@ -240,5 +245,56 @@ jobs:
         with:
           name: webrtc-android-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
           path: libwebrtc.aar
+          if-no-files-found: error
+          retention-days: 30
+
+      # The AAR ships stripped, so a native abort inside it symbolicates to
+      # nothing: an emulator SIGABRT on the signaling thread arrives as a column
+      # of bare addresses, which is exactly why doc/KnownGaps.md in WebRTCme has
+      # carried that fault as "blocked on nobody - the prebuilt .aar has no
+      # symbols" for as long as it has.
+      #
+      # Nothing here changes the build. The unstripped objects are a by-product
+      # the build already writes to lib.unstripped and then leaves behind, so
+      # this only stops throwing them away - unlike the Apple builds, where
+      # producing dSYMs needed extra gn args and the claim that they left the
+      # binary alone had to be measured before it could be trusted. Here the AAR
+      # is the same file whether this runs or not, by construction.
+      #
+      # What this gives is the ELF symbol table: function names for a stack of
+      # addresses. Line numbers would need symbol_level=2, which *would* change
+      # the build, and whether that leaves the stripped .so identical is not
+      # something anyone has checked - so it is deliberately not done here.
+      - name: Keep the unstripped shared objects
+        if: inputs.symbols
+        run: |
+          set -euo pipefail
+          cd "$HOME/webrtc-checkout/src"
+
+          # One per architecture, in a lib.unstripped directory under that
+          # architecture's build directory. Searched rather than named, the way
+          # tools/inject_gen_jni.py walks the same tree for the same reason:
+          # build_aar.py has renamed its output layout before, and a silently
+          # empty symbols archive is worse than a failed build.
+          found="$(find out_aar -path '*/lib.unstripped/*.so' -print | sort)"
+          if [ -z "${found}" ]; then
+            echo "::error::symbols were requested but the build produced no lib.unstripped objects."
+            exit 1
+          fi
+          echo "${found}"
+
+          # Stored with the path find produced, so each architecture's object
+          # stays distinguishable - every one of them is called
+          # libjingle_peerconnection_so.so and a flat zip would collide.
+          find out_aar -path '*/lib.unstripped/*.so' -print0 |
+            xargs -0 zip -qy "$GITHUB_WORKSPACE/libwebrtc-symbols.zip"
+          ls -lh "$GITHUB_WORKSPACE/libwebrtc-symbols.zip"
+
+      - name: Upload the unstripped shared objects
+        if: inputs.symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-android-symbols-m${{ steps.webrtc.outputs.milestone }}-${{ steps.webrtc.outputs.branch }}
+          path: libwebrtc-symbols.zip
           if-no-files-found: error
           retention-days: 30
