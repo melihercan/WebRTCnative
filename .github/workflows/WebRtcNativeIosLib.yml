@@ -29,9 +29,9 @@ on:
         type: choice
         options: ['release', 'debug']
       dsyms:
-        description: 'Also produce dSYMs, so a crash report from this framework can be symbolicated.'
+        description: 'Produce dSYMs, so a crash report from this framework can be symbolicated.'
         required: false
-        default: false
+        default: true
         type: boolean
 
 jobs:
@@ -108,6 +108,23 @@ jobs:
           # still the framework that ships -- unlike build_config=debug, which
           # changes both the code and its timing, and timing is exactly what a
           # racy fault is sensitive to.
+          #
+          # "Leaves the linked binary alone" is now measured rather than assumed,
+          # which is why this defaults to true. The Mac Catalyst framework built
+          # with these args in run 35702483117 is byte-identical to the one
+          # already shipped in WebRTCme 26.9.21.1 -- same sha256
+          # (266a493543a6385b65a64630bd4f512d0a9b4189cf579cbd4a1c27ae02b03f4c)
+          # and the same LC_UUIDs. So a dSYM produced here symbolicates a build
+          # that shipped without one, and the crash reports people already have
+          # become readable without reshipping anything or reproducing anything.
+          #
+          # That is worth having on every build rather than on request, because
+          # the moment you want symbols is always after the crash. The bundle is
+          # a separate artifact on a 30-day retention, so it costs nobody a
+          # download who does not want it. WebRTCnative#5 is the case in point:
+          # eight bare offsets that turned out to be PeerConnection::Close
+          # deadlocking against its own operations chain, which no amount of
+          # reasoning about the offsets had produced.
           #
           # One --extra-gn-args taking both values, and last on the line:
           # build_ios_libs.py declares it nargs='*', so a second one would
